@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>remote-link</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <div id="stage">
+    <canvas id="screen"></canvas>
+    <div id="overlay">
+      <div class="card">
+        <h1>remote&#8209;link</h1>
+        <p id="status">conectando…</p>
+        <button id="connect">Conectar</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="bar">
+    <button id="menuToggle" title="menu">⚙</button>
+    <span class="group">
+      <label>qualidade</label>
+      <select id="preset"></select>
+    </span>
+    <span class="group">
+      <label>monitor</label>
+      <select id="monitor"></select>
+    </span>
+    <button id="sound" title="ligar/desligar áudio">🔇 som</button>
+    <span class="group" id="audioGroup" hidden>
+      <label>áudio</label>
+      <select id="audioPreset"></select>
+    </span>
+    <button id="lock" title="capturar mouse (jogos/FPS)">🎯 mouse</button>
+    <button id="kbd" title="abrir teclado (mobile)">⌨</button>
+    <button id="full" title="tela cheia">⛶</button>
+    <span id="stats" class="stats">-</span>
+  </div>
+
+  <input id="hiddenKbd" autocomplete="off" autocorrect="off" autocapitalize="off"
+         spellcheck="false" aria-hidden="true">
+
+  <script src="/app.js"></script>
+</body>
+</html>
