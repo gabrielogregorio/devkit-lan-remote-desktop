@@ -56,12 +56,20 @@ class Preset:
         return self.fps
 
 
+# Escala UNICA de qualidade (a UI manda 1 nivel; o audio segue junto - ver
+# main.AUDIO_FOR_QUALITY). max_h limita a ALTURA de saida: como a fonte costuma
+# ser 1080p, pedir 2160 nao "sobe" nada (so faz ultra == high). Por isso o topo
+# fica em 1080p nativo e o que abre a faixa de verdade e descer a resolucao +
+# bitrate ate o chao (360p/1.2M) - diferenca que da pra PERCEBER no celular,
+# decodifica facil (menos lag) e segura 60fps em device fraco.
+# fps fica em 60 ate "low" (leve POReM suave); so "potato" cai pra 30 (piso real
+# pra rede ruim, metade dos pacotes).
 PRESETS = {
-    "ultra":  Preset("ultra",  2160, 60, "40M"),
-    "high":   Preset("high",   1080, 60, "15M"),
-    "medium": Preset("medium",  900, 60, "8M"),
-    "low":    Preset("low",     720, 30, "4M"),
-    "potato": Preset("potato",  540, 30, "2M"),
+    "ultra":  Preset("ultra",  1080, 60, "25M"),    # 1080p nitido (teto da fonte)
+    "high":   Preset("high",    900, 60, "12M"),
+    "medium": Preset("medium",  720, 60, "7M"),
+    "low":    Preset("low",     540, 60, "3500k"),   # leve e ainda 60fps
+    "potato": Preset("potato",  360, 30, "1200k"),   # piso: celular/rede fraca
 }
 DEFAULT_PRESET = os.environ.get("RL_PRESET", "high")
 

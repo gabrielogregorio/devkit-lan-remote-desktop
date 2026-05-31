@@ -234,7 +234,6 @@ function connectAudio() {
 function setAudio(on) {
   audioOn = on;
   const btn = $("sound");
-  $("audioGroup").hidden = !on;
   if (on) {
     btn.textContent = "🔊 som";
     btn.classList.add("on");
@@ -439,16 +438,16 @@ $("menuToggle").addEventListener("click", () =>
 );
 $("sound").addEventListener("click", () => setAudio(!audioOn));
 
-$("preset").addEventListener("change", (e) =>
-  sendInput({ t: "q", preset: e.target.value }),
-);
+// qualidade é um ESTADO ÚNICO: o servidor arrasta o áudio junto (ver
+// main.AUDIO_FOR_QUALITY). Feedback na tela pra a troca ser perceptível.
+$("preset").addEventListener("change", (e) => {
+  sendInput({ t: "q", preset: e.target.value });
+  setStatus(`qualidade: ${e.target.value}`);
+});
 $("monitor").addEventListener("change", (e) => {
   const v = e.target.value;
   sendInput({ t: "mon", i: v === "" ? null : Number(v) });
 });
-$("audioPreset").addEventListener("change", (e) =>
-  sendInput({ t: "aq", preset: e.target.value }),
-);
 
 $("hiddenKbd").addEventListener("input", (e) => {
   const ch = e.data;
@@ -489,19 +488,10 @@ async function loadConfig() {
       if (m.index === cfg.current_monitor) o.selected = true;
       ms.appendChild(o);
     }
-    // áudio
+    // áudio: sem seletor próprio - segue o nível de qualidade. Só liga/desliga.
     const sbtn = $("sound");
     if (cfg.audio_available && "AudioDecoder" in window) {
       sbtn.disabled = false;
-      const aps = $("audioPreset");
-      aps.innerHTML = "";
-      for (const p of cfg.audio_presets || []) {
-        const o = document.createElement("option");
-        o.value = p;
-        o.textContent = p;
-        if (p === cfg.current_audio_preset) o.selected = true;
-        aps.appendChild(o);
-      }
     } else {
       sbtn.disabled = true;
       sbtn.title = cfg.audio_available

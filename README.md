@@ -77,24 +77,20 @@ Variáveis de ambiente úteis:
 
 ### Qualidade × FPS
 
-| preset  | resolução máx | fps | bitrate |
-|---------|---------------|-----|---------|
-| ultra   | 2160p         | 60  | 40 Mbps |
-| high    | 1080p         | 60  | 15 Mbps |
-| medium  | 900p          | 60  | 8 Mbps  |
-| low     | 720p          | 30  | 4 Mbps  |
-| potato  | 540p          | 30  | 2 Mbps  |
+A qualidade é um **estado único**: o nível escolhido na página ajusta vídeo
+**e** áudio juntos (o encoder reinicia na hora). A faixa vai de nítido a
+ultra-leve - quanto mais baixo, mais leve a transmissão e menos lag (e o áudio
+acompanha). `fps` fica em 60 até `low`; só `potato` cai pra 30 (piso pra rede
+ruim). Como a fonte normalmente é 1080p, pedir mais que isso não "sobe" nada -
+por isso o topo é 1080p nítido.
 
-Dá pra trocar em tempo real pelo menu da página (o encoder reinicia na hora).
-
-### Qualidade de áudio
-
-| preset | bitrate | uso          |
-|--------|---------|--------------|
-| alta   | 256 kbps | música      |
-| media  | 128 kbps | geral (padrão) |
-| baixa  | 64 kbps  | rede fraca  |
-| voz    | 48 kbps  | otimizado p/ voz (VoIP) |
+| nível   | resolução máx | fps | bitrate vídeo | áudio          |
+|---------|---------------|-----|---------------|----------------|
+| ultra   | 1080p         | 60  | 25 Mbps       | alta (256 kbps) |
+| high    | 900p          | 60  | 12 Mbps       | alta (256 kbps) |
+| medium  | 720p          | 60  | 7 Mbps        | media (128 kbps) |
+| low     | 540p          | 60  | 3,5 Mbps      | baixa (64 kbps) |
+| potato  | 360p          | 30  | 1,2 Mbps      | voz (48 kbps)  |
 
 ---
 
@@ -103,14 +99,14 @@ Dá pra trocar em tempo real pelo menu da página (o encoder reinicia na hora).
 - **Mouse/touch**: mover/clicar direto na tela. No mobile, *tap* = clique,
   arraste = mover o cursor.
 - **🔊 som**: liga/desliga o áudio. Começa desligado (políticas de autoplay
-  exigem um clique); ao ligar aparece o seletor de qualidade de áudio.
+  exigem um clique). A qualidade do som segue o nível de qualidade geral.
 - **🎯 mouse**: ativa *pointer lock* (mouse relativo) - ideal para jogos/FPS.
 - **⌨**: abre o teclado virtual no mobile.
 - **⛶**: tela cheia.
 - **Gamepad**: conecte um controle Xbox no device; é detectado e repassado
   automaticamente.
-- **qualidade / monitor / áudio**: troca preset de vídeo, qual monitor capturar
-  e a qualidade do som.
+- **qualidade / monitor**: troca o nível de qualidade (vídeo + áudio juntos) e
+  qual monitor capturar.
 
 ---
 

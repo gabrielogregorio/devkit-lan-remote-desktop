@@ -491,20 +491,18 @@ describe("connectAudio", () => {
 });
 
 describe("setAudio", () => {
-  it("setAudio(true): audioGroup visível, botão 'on', startAudioContext, socket", () => {
+  it("setAudio(true): botão 'on', startAudioContext, socket", () => {
     app.setAudio(true);
-    expect(document.getElementById("audioGroup").hidden).toBe(false);
     expect(document.getElementById("sound").classList.contains("on")).toBe(true);
     expect(app.__get("audioCtx")).not.toBeNull();
     expect(globalThis.__sockets.some(s => s.url.includes("/ws/audio"))).toBe(true);
   });
 
-  it("setAudio(false): audioGroup oculto, botão sem 'on', suspend", () => {
+  it("setAudio(false): botão sem 'on', suspend", () => {
     app.setAudio(true);
     const ctx = app.__get("audioCtx");
     const suspendSpy = vi.spyOn(ctx, "suspend");
     app.setAudio(false);
-    expect(document.getElementById("audioGroup").hidden).toBe(true);
     expect(document.getElementById("sound").classList.contains("on")).toBe(false);
     expect(suspendSpy).toHaveBeenCalled();
     expect(app.__get("audioDecoder")).toBeNull();
@@ -1113,18 +1111,6 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "mon", i: null });
   });
 
-  it("#audioPreset change envia t:aq preset", () => {
-    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    const sel = document.getElementById("audioPreset");
-    const opt = document.createElement("option");
-    opt.value = "alta";
-    sel.appendChild(opt);
-    sel.value = "alta";
-    sel.dispatchEvent(new Event("change"));
-    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg).toEqual({ t: "aq", preset: "alta" });
-  });
-
   it("#hiddenKbd input com letra envia keydown + keyup", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const input = document.getElementById("hiddenKbd");
@@ -1175,7 +1161,6 @@ describe("loadConfig", () => {
     expect(document.getElementById("preset").options).toHaveLength(5);
     expect(document.getElementById("monitor").options).toHaveLength(1);
     expect(document.getElementById("sound").disabled).toBe(false);
-    expect(document.getElementById("audioPreset").options).toHaveLength(4);
     // selected no preset atual
     const selected = Array.from(document.getElementById("preset").options).find(o => o.selected);
     expect(selected.value).toBe("high");

@@ -506,6 +506,23 @@ async def test_ws_input_comandos(client, monkeypatch):
     await ws.close()
 
 
+async def test_ws_input_q_sincroniza_audio(client):
+    # estado UNICO: um 'q' move video E audio juntos (AUDIO_FOR_QUALITY)
+    ws = await client.ws_connect("/ws/input")
+    await ws.send_str(json.dumps({"t": "q", "preset": "potato"}))
+    await asyncio.sleep(0.05)
+    assert client.app["hub"].preset_name == "potato"
+    assert client.app["audio_hub"].preset_name == M.AUDIO_FOR_QUALITY["potato"]
+    await ws.close()
+
+
+def test_audio_for_quality_cobre_todos_presets():
+    # todo nivel de video tem um audio correspondente (sem buracos no estado unico)
+    assert set(M.AUDIO_FOR_QUALITY) == set(video.PRESETS)
+    for a in M.AUDIO_FOR_QUALITY.values():
+        assert a in audio.AUDIO_PRESETS
+
+
 async def test_ws_video_close_message(client):
     ws = await client.ws_connect("/ws/video")
     await ws.close()

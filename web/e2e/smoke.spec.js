@@ -38,8 +38,8 @@ test("botão de som habilita/desabilita áudio", async ({ page }) => {
   const disabled = await btn.isDisabled();
   if (!disabled) {
     await btn.click();
-    await expect(page.locator("#audioGroup")).toBeVisible();
+    await expect(btn).toHaveClass(/on/);
     await btn.click();
-    await expect(page.locator("#audioGroup")).toBeHidden();
+    await expect(btn).not.toHaveClass(/on/);
   }
 });

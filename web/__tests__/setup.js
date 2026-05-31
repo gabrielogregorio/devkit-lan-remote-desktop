@@ -2,8 +2,8 @@ import { beforeEach, vi } from "vitest";
 
 const IDS = [
   "screen", "overlay", "status", "stats", "connect", "lock", "full",
-  "kbd", "menuToggle", "sound", "preset", "monitor", "audioPreset",
-  "hiddenKbd", "bar", "audioGroup",
+  "kbd", "menuToggle", "sound", "preset", "monitor",
+  "hiddenKbd", "bar",
 ];
 
 export function mountDOM() {
@@ -11,7 +11,7 @@ export function mountDOM() {
   for (const id of IDS) {
     const el =
       id === "screen" ? document.createElement("canvas") :
-      ["preset", "monitor", "audioPreset"].includes(id) ? document.createElement("select") :
+      ["preset", "monitor"].includes(id) ? document.createElement("select") :
       id === "hiddenKbd" ? document.createElement("input") :
       document.createElement("div");
     el.id = id;

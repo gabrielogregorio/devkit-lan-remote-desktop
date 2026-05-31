@@ -98,8 +98,9 @@ no `AudioContext`. Liga só com ≥1 ouvinte conectado.
 - `{"t":"w","x","y"}` scroll
 - `{"t":"k","code":"KeyA","down":true}` tecla
 - `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...]}` gamepad (standard mapping)
-- `{"t":"q","preset":"high"}` trocar qualidade de vídeo (reinicia o encoder)
-- `{"t":"aq","preset":"media"}` trocar qualidade de áudio (reinicia o encoder Opus)
+- `{"t":"q","preset":"high"}` trocar qualidade - **estado único**: ajusta vídeo
+  E áudio juntos (o áudio segue `main.AUDIO_FOR_QUALITY`; reinicia os encoders)
+- `{"t":"aq","preset":"media"}` override manual só do áudio (não exposto na UI)
 - `{"t":"mon","i":0}` trocar monitor (`i:null` = primário)
 
 ## Convenções

@@ -33,6 +33,18 @@ WEB_DIR = os.path.join(os.path.dirname(HERE), "web")
 
 RESET_MSG = json.dumps({"t": "reset"})
 
+# Estado UNICO de qualidade: cada nivel de video (a UI so expoe esse) arrasta o
+# audio na mesma "altura". Assim "low" deixa video + audio + transmissao leves
+# de uma vez - sem o usuario gerenciar dois controles. O canal 'aq' continua
+# existindo pra override manual/RL_AUDIO_PRESET, mas a UI nao o expoe.
+AUDIO_FOR_QUALITY = {
+    "ultra":  "alta",
+    "high":   "alta",
+    "medium": "media",
+    "low":    "baixa",
+    "potato": "voz",
+}
+
 
 class VideoClient:
     def __init__(self, ws: web.WebSocketResponse):
@@ -286,7 +298,11 @@ async def ws_input(request):
             continue
         t = data.get("t")
         if t == "q":
-            await hub.set_preset(data.get("preset", ""))
+            preset = data.get("preset", "")
+            await hub.set_preset(preset)
+            # estado unico: o audio acompanha o nivel de qualidade do video
+            if preset in AUDIO_FOR_QUALITY:
+                await ahub.set_preset(AUDIO_FOR_QUALITY[preset])
         elif t == "aq":
             await ahub.set_preset(data.get("preset", ""))
         elif t == "mon":
