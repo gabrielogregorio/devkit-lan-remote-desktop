@@ -1,0 +1,2 @@
+aiohttp>=3.9
+evdev>=1.6

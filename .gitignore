@@ -1,0 +1,16 @@
+.venv/
+certs/
+__pycache__/
+*.pyc
+
+# testes (Parte A - Python)
+.pytest_cache/
+.coverage
+htmlcov/
+
+# testes (Parte B - web: Vitest/Playwright)
+node_modules/
+coverage/
+playwright-report/
+test-results/
+settings.json
