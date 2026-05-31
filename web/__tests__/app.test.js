@@ -70,6 +70,39 @@ describe("charToCode", () => {
   it("toUpperCase para minúsculas", () => expect(app.charToCode("e")).toBe("KeyE"));
 });
 
+describe("displayedRect", () => {
+  it("16:9 numa tela 16:9 → preenche sem barras", () => {
+    const canvas = document.getElementById("screen");
+    canvas.width = 1280;
+    canvas.height = 720; // aspecto = elemento (1920x1080)
+    const r = app.displayedRect();
+    expect(r.left).toBeCloseTo(0);
+    expect(r.top).toBeCloseTo(0);
+    expect(r.width).toBeCloseTo(1920);
+    expect(r.height).toBeCloseTo(1080);
+  });
+
+  it("buffer mais 'alto' que o elemento → barras laterais (offset em left)", () => {
+    const canvas = document.getElementById("screen");
+    canvas.width = 540;
+    canvas.height = 540; // 1:1 num elemento 16:9 → escala por altura, sobra nos lados
+    const r = app.displayedRect();
+    expect(r.height).toBeCloseTo(1080);
+    expect(r.width).toBeCloseTo(1080);
+    expect(r.left).toBeCloseTo((1920 - 1080) / 2);
+    expect(r.top).toBeCloseTo(0);
+  });
+
+  it("fallback quando o buffer é 0 usa o tamanho do elemento", () => {
+    const canvas = document.getElementById("screen");
+    canvas.width = 0;
+    canvas.height = 0;
+    const r = app.displayedRect();
+    expect(r.width).toBeCloseTo(1920);
+    expect(r.height).toBeCloseTo(1080);
+  });
+});
+
 describe("normFromEvent", () => {
   it("centro exato 0.5,0.5", () => {
     const n = app.normFromEvent({ clientX: 960, clientY: 540 });

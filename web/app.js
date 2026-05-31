@@ -301,8 +301,27 @@ function flushMove() {
   requestAnimationFrame(flushMove);
 }
 
-function normFromEvent(e) {
+// Retângulo REAL onde o vídeo é desenhado dentro do <canvas>. Como o canvas usa
+// object-fit:contain pra ocupar a tela toda, pode sobrar barra preta (ex.: a
+// fonte é 16:9 e o celular está em pé). O mouse tem que mapear pra esse rect, não
+// pro elemento inteiro, senão clicar/mover erra na proporção da barra.
+function displayedRect() {
   const r = canvas.getBoundingClientRect();
+  const bw = canvas.width || r.width;
+  const bh = canvas.height || r.height;
+  const scale = Math.min(r.width / bw, r.height / bh);
+  const w = bw * scale,
+    h = bh * scale;
+  return {
+    left: r.left + (r.width - w) / 2,
+    top: r.top + (r.height - h) / 2,
+    width: w,
+    height: h,
+  };
+}
+
+function normFromEvent(e) {
+  const r = displayedRect();
   return {
     x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
     y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
@@ -311,7 +330,7 @@ function normFromEvent(e) {
 
 canvas.addEventListener("mousemove", (e) => {
   if (document.pointerLockElement === canvas) {
-    const r = canvas.getBoundingClientRect();
+    const r = displayedRect();
     sendInput({
       t: "mr",
       dx: e.movementX / r.width,
@@ -546,7 +565,7 @@ if (typeof module !== "undefined" && module.exports) {
     startAudioContext, ensureAudioDecoder, resetAudioDecoder,
     playAudio, onAudioPacket, connectAudio, setAudio,
     connect, connectVideo, connectInput, sendInput,
-    flushMove, normFromEvent, pollPads,
+    flushMove, normFromEvent, displayedRect, pollPads,
     setStatus, charToCode, loadConfig, statsLoop, boot,
     __get: (k) => eval(k),
   };
