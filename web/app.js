@@ -548,4 +548,18 @@ function boot() {
   pollPads();
   requestAnimationFrame(flushMove);
 }
-boot();
+// ---------- boot / test seam ----------
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = {
+    hex2, findNALs, codecFromSPS,
+    ensureDecoder, resetDecoder, onAU,
+    startAudioContext, ensureAudioDecoder, resetAudioDecoder,
+    playAudio, onAudioPacket, connectAudio, setAudio,
+    connect, connectVideo, connectInput, sendInput,
+    flushMove, normFromEvent, pollPads,
+    setStatus, charToCode, loadConfig, statsLoop, boot,
+    __get: (k) => eval(k),
+  };
+} else {
+  boot();
+}
