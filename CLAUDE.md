@@ -121,12 +121,16 @@ no `AudioContext`. Liga só com ≥1 ouvinte conectado.
   `AudioHub.manual=True` → desliga o arrasto do `q`).
 - `{"t":"mon","i":0}` trocar monitor (`i:null` = primário)
 
-Encoder H.264 tunado p/ baixa latência: GOP ~2s (keyframe espaçado reduz picos
-que travam o decoder do browser), VBV pequeno (`_lowlat_bufsize` ~1/3 do
-bitrate/s), spatial-AQ no NVENC (nitidez no mesmo bitrate), profile `high`,
+Encoder H.264 tunado p/ baixa latência: GOP ~1s (ressync rápido p/ cliente novo
+sem tela preta longa; na LAN banda sobra), VBV pequeno (`_lowlat_bufsize` ~1/3
+do bitrate/s), spatial-AQ no NVENC (nitidez no mesmo bitrate), profile `high`,
 `no-scenecut`+`forced-idr`. O encode (NVENC) sustenta 1080p60 a 1x; o
 gargalo prático costuma ser o **decode no browser**, por isso a régua útil é
 descer resolução/bitrate (controles separados).
+
+O cliente (`web/app.js`) **descarta delta frames até o 1º keyframe** após
+`configure()`/reset (`needKey`): o `VideoDecoder` exige keyframe como 1º chunk,
+senão dá erro "key frame is required" no Firefox e no Chrome.
 
 ## Convenções
 

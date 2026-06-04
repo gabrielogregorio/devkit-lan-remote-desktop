@@ -16,6 +16,7 @@ let videoWS = null,
 let decoder = null,
   configured = false,
   configuring = false,
+  needKey = true, // 1º chunk após configure()/reset TEM que ser keyframe
   codecStr = null;
 let tsCounter = 0;
 let frames = 0,
@@ -76,6 +77,7 @@ function ensureDecoder() {
 function resetDecoder() {
   configured = false;
   configuring = false;
+  needKey = true;
   codecStr = null;
   try {
     if (decoder && decoder.state !== "closed") decoder.close();
@@ -131,8 +133,18 @@ function onAU(buf) {
     configureDecoder(codecStr).then((ok) => {
       configuring = false;
       configured = ok;
+      needKey = true; // só começa a decodificar no próximo keyframe
     });
     return; // este AU serve só pra configurar; o próximo keyframe começa o decode
+  }
+
+  // O VideoDecoder EXIGE que o 1º chunk após configure()/flush seja keyframe.
+  // Como a config é assíncrona e o GOP é longo, os AUs que chegam logo depois
+  // costumam ser delta -> descarta até cair um keyframe (senão dá erro
+  // "key frame is required" no Firefox e no Chrome).
+  if (needKey) {
+    if (!isKey) return;
+    needKey = false;
   }
 
   try {

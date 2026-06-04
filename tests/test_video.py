@@ -53,14 +53,14 @@ def test_detect_x264(monkeypatch):
 # ───────────────────────── Preset.gop ─────────────────────────
 
 def test_preset_gop():
-    # GOP ~2s (keyframe espacado p/ reduzir picos de banda no decoder do browser)
-    assert video.PRESETS["high"].gop == 120
+    # GOP ~1s (ressync rapido p/ cliente novo sem tela preta longa)
+    assert video.PRESETS["high"].gop == 60
 
 
 def test_video_settings_gop_e_from_preset():
     vs = video.VideoSettings.from_preset(video.PRESETS["low"])
     assert (vs.max_h, vs.fps, vs.bitrate) == (540, 60, "3500k")
-    assert vs.gop == 120
+    assert vs.gop == 60
     assert video.VideoSettings(max_h=720, fps=1, bitrate="7M").gop == 2  # piso 2
 
 

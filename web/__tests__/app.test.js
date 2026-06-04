@@ -345,11 +345,14 @@ describe("onAU", () => {
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
   // A configuração é assíncrona (isConfigSupported). O 1º keyframe dispara a
-  // sondagem e NÃO decodifica; após configurado, os próximos AUs decodificam.
+  // sondagem e NÃO decodifica; após configurado, o decoder ainda EXIGE um
+  // keyframe como 1º chunk (needKey) -> mandamos mais um SPS pra destravar.
   async function setup() {
     app.onAU(spsAU()); // dispara configuração async
     await flush();
     expect(app.__get("configured")).toBe(true);
+    app.onAU(spsAU()); // 1º keyframe pós-config: zera needKey e decodifica
+    expect(app.__get("needKey")).toBe(false);
   }
 
   it("AU sem SPS e configured=false retorna sem criar decoder", () => {
@@ -361,7 +364,22 @@ describe("onAU", () => {
     await setup();
     const dec = app.__get("decoder");
     expect(dec).not.toBeNull();
+    expect(dec.decoded[dec.decoded.length - 1].type).toBe("key");
+  });
+
+  it("após config, deltas são descartados até chegar um keyframe", async () => {
     app.onAU(spsAU());
+    await flush();
+    expect(app.__get("configured")).toBe(true);
+    expect(app.__get("needKey")).toBe(true);
+    const dec = app.__get("decoder");
+    // delta antes do keyframe -> NÃO decodifica (needKey ainda true)
+    app.onAU(deltaAU());
+    expect(dec.decoded).toBeUndefined();
+    expect(app.__get("needKey")).toBe(true);
+    // chega o keyframe -> destrava e decodifica
+    app.onAU(spsAU());
+    expect(app.__get("needKey")).toBe(false);
     expect(dec.decoded[dec.decoded.length - 1].type).toBe("key");
   });
 

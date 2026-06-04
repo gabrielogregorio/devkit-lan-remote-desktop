@@ -52,10 +52,11 @@ class Preset:
 
     @property
     def gop(self) -> int:
-        # GOP ~2s: keyframe e o frame mais pesado (pico de banda que o decoder do
-        # browser engasga). Espacar pra ~2s reduz pela metade esses picos; novos
-        # clientes ainda ressincronizam rapido (<=2s) e a UI pede reset no connect.
-        return max(2, self.fps * 2)
+        # GOP ~1s: o keyframe e o frame mais pesado, mas na LAN banda sobra e o
+        # que importa e o cliente novo (e cada ressync apos erro/reset) NAO ficar
+        # com tela preta esperando o proximo IDR. 1s e o equilibrio: ressync
+        # rapido sem picos exagerados.
+        return max(2, self.fps)
 
 
 @dataclass
@@ -69,7 +70,7 @@ class VideoSettings:
 
     @property
     def gop(self) -> int:
-        return max(2, self.fps * 2)
+        return max(2, self.fps)
 
     @classmethod
     def from_preset(cls, p: "Preset") -> "VideoSettings":
