@@ -49,6 +49,7 @@
     <button id="sound" title="ligar/desligar áudio">🔇 som</button>
     <button id="lock" title="capturar mouse (jogos/FPS)">🎯 mouse</button>
     <button id="kbd" title="teclado virtual">⌨</button>
+    <button id="remapBtn" title="remapear controle (PS2/USB)">🎮</button>
     <button id="full" title="tela cheia">⛶</button>
     <span class="group combos">
       <label>atalhos</label>
@@ -61,6 +62,19 @@
   </div>
 
   <div id="osk" class="hidden"></div>
+
+  <div id="remap" class="hidden">
+    <div class="card">
+      <h2 id="remapTitle">Remapear controle</h2>
+      <p id="remapPrompt">Acione o controle…</p>
+      <div class="remap-actions">
+        <button id="remapSkip">Pular</button>
+        <button id="remapCancel">Cancelar</button>
+      </div>
+      <p class="remap-hint">Dica: para controles PS2/USB, siga cada passo
+        apertando o botão/direção pedido. O perfil fica salvo no servidor.</p>
+    </div>
+  </div>
 
   <script src="/app.js"></script>
 </body>

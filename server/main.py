@@ -25,7 +25,7 @@ guardian.enforce_preflight()
 
 from aiohttp import web, WSMsgType  # noqa: E402
 
-from . import audio, video  # noqa: E402
+from . import audio, gamepad, video  # noqa: E402
 from .inject import Injector  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -314,6 +314,26 @@ async def ws_audio(request):
     return ws
 
 
+async def api_gamepad_map_get(request):
+    """Retorna todos os perfis de remapeamento salvos (por gamepad.id)."""
+    return web.json_response(gamepad.load_maps())
+
+
+async def api_gamepad_map_post(request):
+    """Salva o perfil de um controle. Body: {"id": "<gamepad.id>", "map": {...}}."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "json invalido"}, status=400)
+    pad_id = body.get("id")
+    mapping = body.get("map")
+    try:
+        gamepad.save_map(pad_id, mapping)
+    except ValueError as ex:
+        return web.json_response({"error": str(ex)}, status=400)
+    return web.json_response({"ok": True})
+
+
 async def ws_input(request):
     hub: Hub = request.app["hub"]
     ahub: AudioHub = request.app["audio_hub"]
@@ -369,6 +389,8 @@ def build_app() -> web.Application:
     app["audio_hub"] = audio_hub
     app.router.add_get("/", index)
     app.router.add_get("/api/monitors", api_monitors)
+    app.router.add_get("/api/gamepad-map", api_gamepad_map_get)
+    app.router.add_post("/api/gamepad-map", api_gamepad_map_post)
     app.router.add_get("/ws/video", ws_video)
     app.router.add_get("/ws/audio", ws_audio)
     app.router.add_get("/ws/input", ws_input)

@@ -1344,6 +1344,249 @@ describe("Gamepad / pollPads", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 4.9b Remapeamento de gamepad (PS2/USB) + perfil salvo no servidor
+// ---------------------------------------------------------------------------
+
+describe("gamepad remap / mapPad", () => {
+  const mkPad = (over = {}) => ({
+    id: "Twin USB Joystick",
+    mapping: "",
+    axes: [0, 0, 0, 0],
+    buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })),
+    ...over,
+  });
+
+  it("loadGamepadMaps busca o perfil do servidor", async () => {
+    globalThis.fetch = vi.fn(async () => ({ json: async () => ({ Pad: { buttons: { a: 3 } } }) }));
+    await app.loadGamepadMaps();
+    expect(app.__get("padMaps").Pad.buttons.a).toBe(3);
+  });
+
+  it("loadGamepadMaps falhando: padMaps vira {}", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
+    await app.loadGamepadMaps();
+    expect(app.__get("padMaps")).toEqual({});
+  });
+
+  it("readSource: botão, eixo normalizado e ausência", () => {
+    const p = mkPad({ axes: [0, 0, 0, 0, 0.5], buttons: [{ pressed: true, value: 0.8 }] });
+    expect(app.readSource(p, { src: "button", i: 0 })).toBeCloseTo(0.8, 2);
+    // eixo 0.5 em [-1..1] -> 0.75
+    expect(app.readSource(p, { src: "axis", i: 4 })).toBeCloseTo(0.75, 2);
+    expect(app.readSource(p, null)).toBe(0);
+    expect(app.readSource(p, { src: "button", i: 99 })).toBe(0); // ausente
+    expect(app.readSource(p, { src: "axis", i: 99 })).toBe(0);   // NaN/undefined
+  });
+
+  it("mapPad sem perfil: heurística padrão (eixos extras viram gatilhos)", () => {
+    const p = mkPad({ axes: [0.1, 0.2, 0.3, 0.4, 1.0, -1.0] });
+    const r = app.mapPad(p);
+    expect(r.a).toEqual([0.1, 0.2, 0.3, 0.4]);
+    expect(r.lt).toBeCloseTo(1.0, 2);
+    expect(r.rt).toBeCloseTo(0.0, 2);
+  });
+
+  it("mapPad com perfil: reordena botões/eixos e lê gatilhos", async () => {
+    // injeta um perfil pro id do pad
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({
+        "Twin USB Joystick": {
+          buttons: { a: 2, b: 1 },           // A está no índice bruto 2
+          axes: { lx: 3, ly: 0 },
+          triggers: { lt: { src: "button", i: 6 }, rt: { src: "axis", i: 5, min: -1, max: 1 } },
+        },
+      }),
+    }));
+    await app.loadGamepadMaps();
+    const p = mkPad({
+      axes: [0, 0, 0, 0.9, 0, 1.0],
+      buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 2, value: i === 2 ? 1 : (i === 6 ? 0.5 : 0) })),
+    });
+    const r = app.mapPad(p);
+    expect(r.b[0]).toEqual({ p: true, v: 1 });   // 'a' lógico <- bruto 2
+    expect(r.a[0]).toBeCloseTo(0.9, 2);          // lx <- eixo 3
+    expect(r.lt).toBeCloseTo(0.5, 2);            // botão bruto 6
+    expect(r.rt).toBeCloseTo(1.0, 2);            // eixo 5 (1.0 -> 1.0)
+  });
+
+  it("startRemap sem pad: avisa e não abre", () => {
+    navigator.getGamepads = () => [];
+    app.startRemap();
+    expect(document.getElementById("remap").classList.contains("hidden")).toBe(true);
+    expect(app.__get("remapState").active).toBe(false);
+  });
+
+  it("startRemap sem getGamepads disponível não lança", () => {
+    navigator.getGamepads = undefined;
+    expect(() => app.startRemap()).not.toThrow();
+    expect(app.__get("remapState").active).toBe(false);
+  });
+
+  it("readSource com range degenerado (max==min) não divide por zero", () => {
+    const p = mkPad({ axes: [0, 0, 0, 0, 0.5] });
+    const v = app.readSource(p, { src: "axis", i: 4, min: 1, max: 1 });
+    expect(Number.isFinite(v)).toBe(true);
+  });
+
+  it("applyDetection: botão lógico detectado como eixo (caso raro)", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    app.applyDetection({ kind: "button", name: "a" }, { src: "axis", i: 4 });
+    expect(app.__get("remapState").draft.axes.a_axisbtn).toBe(4);
+    app.cancelRemap();
+  });
+
+  it("detectChange com base sem aquele índice (?? 0)", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    // força base curta -> base.buttons[i]/axes[i] indefinidos -> ?? 0
+    app.__get("remapState").base = { buttons: [], axes: [] };
+    const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, 0.9] }));
+    expect(found).not.toBeNull();
+    app.cancelRemap();
+  });
+
+  it("detectChange com eixo negativo registra dir -1", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, -0.9] }));
+    expect(found).toEqual({ src: "axis", i: 4, dir: -1 });
+    app.cancelRemap();
+  });
+
+  it("startRemap com pad: abre overlay e fica ativo", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    expect(document.getElementById("remap").classList.contains("hidden")).toBe(false);
+    expect(app.__get("remapState").active).toBe(true);
+    app.cancelRemap();
+    expect(document.getElementById("remap").classList.contains("hidden")).toBe(true);
+  });
+
+  it("detectChange acha o controle que mais mudou (botão e eixo)", () => {
+    app.__get("remapState"); // garante módulo carregado
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    const base = mkPad();
+    // botão 3 apertado
+    let found = app.detectChange(mkPad({ buttons: base.buttons.map((b, i) => i === 3 ? { pressed: true, value: 1 } : b) }));
+    expect(found).toEqual({ src: "button", i: 3 });
+    // eixo 2 movido
+    found = app.detectChange(mkPad({ axes: [0, 0, 0.9, 0] }));
+    expect(found.src).toBe("axis");
+    expect(found.i).toBe(2);
+    app.cancelRemap();
+  });
+
+  it("applyDetection grava no draft por tipo de passo", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    app.applyDetection({ kind: "button", name: "a" }, { src: "button", i: 5 });
+    app.applyDetection({ kind: "axis", name: "lx" }, { src: "axis", i: 3 });
+    app.applyDetection({ kind: "trigger", name: "lt" }, { src: "axis", i: 4 });
+    app.applyDetection({ kind: "trigger", name: "rt" }, { src: "button", i: 7 });
+    const d = app.__get("remapState").draft;
+    expect(d.buttons.a).toBe(5);
+    expect(d.axes.lx).toBe(3);
+    expect(d.triggers.lt).toEqual({ src: "axis", i: 4, min: -1, max: 1 });
+    expect(d.triggers.rt).toEqual({ src: "button", i: 7 });
+    app.cancelRemap();
+  });
+
+  it("skipRemapStep avança e no fim finaliza+salva", async () => {
+    const posts = [];
+    globalThis.fetch = vi.fn(async (url, opts) => {
+      if (opts && opts.method === "POST") { posts.push(JSON.parse(opts.body)); return { json: async () => ({ ok: true }) }; }
+      return { json: async () => ({}) };
+    });
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    const total = app.__get("REMAP_STEPS").length;
+    for (let i = 0; i < total; i++) app.skipRemapStep();
+    await new Promise((r) => setTimeout(r, 0));
+    expect(app.__get("remapState").active).toBe(false);
+    expect(posts.length).toBe(1);
+    expect(posts[0].id).toBe("Twin USB Joystick");
+  });
+
+  it("finishRemap salvando com erro de rede não lança", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    await expect(app.finishRemap()).resolves.not.toThrow();
+    expect(document.getElementById("status").textContent).toMatch(/falhou ao salvar/);
+  });
+
+  it("remapTick detecta um passo, dá cooldown e avança", () => {
+    let live = mkPad();
+    navigator.getGamepads = () => [live];
+    app.startRemap();
+    const st = app.__get("remapState");
+    const step0 = st.step;
+    // aperta botão 1 -> remapTick deve capturar e avançar 1 passo
+    live = mkPad({ buttons: mkPad().buttons.map((b, i) => i === 1 ? { pressed: true, value: 1 } : b) });
+    navigator.getGamepads = () => [live];
+    app.remapTick();
+    expect(app.__get("remapState").step).toBe(step0 + 1);
+    // logo após, está em cooldown: outra mudança não avança
+    live = mkPad({ buttons: mkPad().buttons.map((b, i) => i === 2 ? { pressed: true, value: 1 } : b) });
+    navigator.getGamepads = () => [live];
+    app.remapTick();
+    expect(app.__get("remapState").step).toBe(step0 + 1); // segurou
+    app.cancelRemap();
+  });
+
+  it("remapTick inativo retorna na hora", () => {
+    app.cancelRemap();
+    expect(() => app.remapTick()).not.toThrow();
+  });
+
+  it("skipRemapStep inativo não faz nada", () => {
+    app.cancelRemap();
+    expect(() => app.skipRemapStep()).not.toThrow();
+  });
+
+  it("renderRemap com step fora do range limpa o prompt", () => {
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    app.__get("remapState").step = app.__get("REMAP_STEPS").length; // além do fim
+    app.renderRemap();
+    expect(document.getElementById("remapPrompt").textContent).toBe("");
+    app.cancelRemap();
+  });
+
+  it("remapTick no último passo finaliza", () => {
+    globalThis.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
+    navigator.getGamepads = () => [mkPad()];
+    app.startRemap();
+    const st = app.__get("remapState");
+    st.step = app.__get("REMAP_STEPS").length - 1; // último passo
+    const live = mkPad({ axes: [0, 0, 0, 0, 0, 0, 0.9] });
+    navigator.getGamepads = () => [live];
+    app.remapTick();
+    expect(app.__get("remapState").active).toBe(false);
+  });
+
+  it("botão #remapBtn dispara startRemap", () => {
+    navigator.getGamepads = () => [mkPad()];
+    document.getElementById("remapBtn").click();
+    expect(document.getElementById("remap").classList.contains("hidden")).toBe(false);
+    app.cancelRemap();
+  });
+
+  it("pollPads não envia enquanto remap está ativo", () => {
+    app.connectInput();
+    navigator.getGamepads = () => [mkPad({ buttons: [{ pressed: true, value: 1 }] })];
+    app.startRemap();
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    app.pollPads();
+    expect(ws.sent).toHaveLength(0);
+    app.cancelRemap();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 4.10 UI — botões e selects
 // ---------------------------------------------------------------------------
 

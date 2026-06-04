@@ -5,6 +5,7 @@ const IDS = [
   "kbd", "menuToggle", "sound", "preset", "monitor",
   "vres", "vfps", "vbitrate", "audioPreset",
   "bar", "osk",
+  "remapBtn", "remap", "remapTitle", "remapPrompt", "remapSkip", "remapCancel",
 ];
 const SELECTS = ["preset", "monitor", "vres", "vfps", "vbitrate", "audioPreset"];
 
@@ -18,8 +19,9 @@ export function mountDOM() {
     el.id = id;
     document.body.appendChild(el);
   }
-  // #osk começa escondido (como no HTML real)
+  // #osk e #remap começam escondidos (como no HTML real)
   document.getElementById("osk").className = "hidden";
+  document.getElementById("remap").className = "hidden";
   // botões de combo (data-combo) que app.js liga no boot
   for (const c of ["altf4", "alttab", "ctrlaltdel", "super"]) {
     const b = document.createElement("button");

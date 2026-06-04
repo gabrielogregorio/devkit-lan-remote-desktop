@@ -81,6 +81,17 @@ hatch anti-ban - ver `ANTIBAN.md`).
 - O render WebCodecs no browser precisa de um navegador real para validação
   visual - `py_compile`/`node --check` só pegam sintaxe.
 
+## Endpoints HTTP
+
+- `GET /api/monitors` - config atual: encoder, monitores, presets, `video`
+  (res/fps/bitrate atuais), faixas (`res_options`/`fps_options`/`bitrate_options`),
+  presets de áudio e `audio_manual`.
+- `GET /api/gamepad-map` - todos os perfis de remapeamento salvos (por
+  `gamepad.id`). `POST` com `{"id","map"}` salva um perfil. Persistido por
+  `server/gamepad.py` em `~/.config/remote-link/gamepad-map.json` (ou
+  `RL_GAMEPAD_MAP`). O cliente traduz o pad bruto → formato Xbox padrão antes de
+  enviar `t:"g"`; o servidor só guarda/serve o JSON (blob opaco).
+
 ## Protocolo dos WebSockets
 
 `/ws/video` (binário): servidor → cliente, cada mensagem = 1 Access Unit H.264

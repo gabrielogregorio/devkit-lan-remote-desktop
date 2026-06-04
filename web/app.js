@@ -494,6 +494,69 @@ const COMBOS = {
 };
 
 // ---------- gamepad ----------
+// Ordem lógica Xbox que o servidor espera em b[] (índices standard):
+// 0=A 1=B 2=X 3=Y 4=LB 5=RB 6=LT 7=RT 8=Back 9=Start 10=LS 11=RS
+// 12=DPup 13=DPdown 14=DPleft 15=DPright 16=Guide. a[]=[lx,ly,rx,ry].
+const PAD_BUTTONS = [
+  "a", "b", "x", "y", "lb", "rb", "lt", "rt", "back", "start",
+  "ls", "rs", "dup", "ddown", "dleft", "dright", "guide",
+];
+const PAD_AXES = ["lx", "ly", "rx", "ry"];
+let padMaps = {}; // { "<gamepad.id>": {buttons:{a:idx,...}, axes:{lx:idx,...},
+                  //   triggers:{lt:{src,i,...}, rt:{...}} } }
+
+async function loadGamepadMaps() {
+  try {
+    padMaps = await (await fetch("/api/gamepad-map")).json();
+  } catch (e) {
+    padMaps = {};
+  }
+}
+
+// lê um source de gatilho/eixo do perfil: {src:"axis",i,min,max} ou {src:"button",i}
+function readSource(p, s) {
+  if (!s) return 0;
+  if (s.src === "button") {
+    const btn = p.buttons[s.i];
+    return btn ? btn.value : 0;
+  }
+  // eixo: normaliza de [min..max] (default -1..1) pra 0..1
+  const v = p.axes[s.i];
+  if (v === undefined || v === null || Number.isNaN(v)) return 0;
+  const min = s.min ?? -1, max = s.max ?? 1;
+  return Math.min(1, Math.max(0, (v - min) / (max - min || 1)));
+}
+
+// Traduz o pad bruto -> formato padrão usando o perfil salvo (se houver).
+function mapPad(p) {
+  const m = padMaps[p.id];
+  if (!m) {
+    // sem perfil: heurística padrão (standard + eixos extras p/ gatilhos)
+    const a = PAD_AXES.map((_, i) => p.axes[i] || 0);
+    const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
+    let lt = b[6] ? b[6].v : 0;
+    let rt = b[7] ? b[7].v : 0;
+    if (p.mapping !== "standard" && p.axes.length >= 6) {
+      lt = Math.max(lt, (p.axes[4] + 1) / 2 || 0);
+      rt = Math.max(rt, (p.axes[5] + 1) / 2 || 0);
+    }
+    return { a, b, lt: +lt.toFixed(3), rt: +rt.toFixed(3) };
+  }
+  // com perfil: monta b[] na ordem lógica a partir dos índices mapeados
+  const b = PAD_BUTTONS.map((name) => {
+    const idx = m.buttons?.[name];
+    const btn = idx != null ? p.buttons[idx] : null;
+    return { p: btn ? btn.pressed : false, v: btn ? +btn.value.toFixed(3) : 0 };
+  });
+  const a = PAD_AXES.map((name) => {
+    const idx = m.axes?.[name];
+    return idx != null ? (p.axes[idx] || 0) : 0;
+  });
+  const lt = +readSource(p, m.triggers?.lt).toFixed(3);
+  const rt = +readSource(p, m.triggers?.rt).toFixed(3);
+  return { a, b, lt, rt };
+}
+
 let padSnap = "";
 function pollPads() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
@@ -503,25 +566,8 @@ function pollPads() {
       p = g;
       break;
     }
-  if (p) {
-    const a = [p.axes[0] || 0, p.axes[1] || 0, p.axes[2] || 0, p.axes[3] || 0];
-    const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
-    // Gatilhos (LT/RT): no mapping "standard" são buttons[6]/[7] (analógicos).
-    // Mas em mappings não-padrão (Firefox/Linux com alguns drivers) eles chegam
-    // como EIXOS extras. Detectamos e mandamos explicitamente em `lt`/`rt` 0..1
-    // pro servidor não depender do índice de botão.
-    let lt = b[6] ? b[6].v : 0;
-    let rt = b[7] ? b[7].v : 0;
-    if (p.mapping !== "standard") {
-      // heurística: eixos além dos 4 sticks costumam ser os gatilhos (−1 solto..+1 fundo)
-      const ax = p.axes;
-      if (ax.length >= 6) {
-        lt = Math.max(lt, (ax[4] + 1) / 2 || 0);
-        rt = Math.max(rt, (ax[5] + 1) / 2 || 0);
-      }
-    }
-    lt = +lt.toFixed(3);
-    rt = +rt.toFixed(3);
+  if (p && !remapState.active) {
+    const { a, b, lt, rt } = mapPad(p);
     const snap = JSON.stringify([a, b, lt, rt]);
     if (snap !== padSnap) {
       padSnap = snap;
@@ -533,6 +579,143 @@ function pollPads() {
 window.addEventListener("gamepadconnected", (e) => {
   setStatus(`controle: ${e.gamepad.id.slice(0, 28)}`);
 });
+
+// ---------- remapeamento de gamepad ----------
+// Fluxo "aperte o botão X": pra cada controle lógico, captura qual botão/eixo
+// bruto do pad foi acionado. Pensado pros controles PS2/USB com mapping caótico.
+// Cada passo: nome lógico + se é botão, eixo (stick) ou gatilho.
+const REMAP_STEPS = [
+  ...PAD_BUTTONS.filter((n) => n !== "lt" && n !== "rt")
+    .map((n) => ({ kind: "button", name: n })),
+  { kind: "trigger", name: "lt" },
+  { kind: "trigger", name: "rt" },
+  { kind: "axis", name: "lx" }, { kind: "axis", name: "ly" },
+  { kind: "axis", name: "rx" }, { kind: "axis", name: "ry" },
+];
+const STEP_LABEL = {
+  a: "A", b: "B", x: "X", y: "Y", lb: "LB (ombro esq.)", rb: "RB (ombro dir.)",
+  back: "Back/Select", start: "Start", ls: "L3 (clicar stick esq.)",
+  rs: "R3 (clicar stick dir.)", guide: "Guide/Home (ou pule)",
+  dup: "D-Pad ↑", ddown: "D-Pad ↓", dleft: "D-Pad ←", dright: "D-Pad →",
+  lt: "LT (gatilho esq.) - aperte até o fundo",
+  rt: "RT (gatilho dir.) - aperte até o fundo",
+  lx: "Stick ESQ. → direita", ly: "Stick ESQ. → baixo",
+  rx: "Stick DIR. → direita", ry: "Stick DIR. → baixo",
+};
+const remapState = { active: false, step: 0, draft: null, base: null, padId: null };
+
+function curPad() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (const g of pads) if (g) return g;
+  return null;
+}
+
+function startRemap() {
+  const p = curPad();
+  if (!p) {
+    setStatus("conecte um controle e mexa nele antes de remapear");
+    return;
+  }
+  remapState.active = true;
+  remapState.step = 0;
+  remapState.padId = p.id;
+  remapState.draft = { buttons: {}, axes: {}, triggers: {} };
+  // snapshot do estado de repouso pra detectar o que MUDOU
+  remapState.base = { buttons: p.buttons.map((b) => b.value), axes: p.axes.slice() };
+  $("remap").classList.remove("hidden");
+  renderRemap();
+  requestAnimationFrame(remapTick);
+}
+
+function cancelRemap() {
+  remapState.active = false;
+  $("remap").classList.add("hidden");
+}
+
+function renderRemap() {
+  const step = REMAP_STEPS[remapState.step];
+  $("remapTitle").textContent =
+    `Remapear (${remapState.step + 1}/${REMAP_STEPS.length})`;
+  // STEP_LABEL cobre todos os nomes; o `|| name` é só rede de segurança.
+  /* v8 ignore next 2 */
+  const label = step ? (STEP_LABEL[step.name] || step.name) : "";
+  $("remapPrompt").textContent = step ? `Acione: ${label}` : "";
+}
+
+// detecta o controle bruto que mais se moveu desde o repouso
+function detectChange(p) {
+  const base = remapState.base;
+  let best = null, bestDelta = 0.35; // limiar p/ ignorar ruído
+  p.buttons.forEach((b, i) => {
+    const d = Math.abs(b.value - (base.buttons[i] ?? 0));
+    if (d > bestDelta) { bestDelta = d; best = { src: "button", i }; }
+  });
+  p.axes.forEach((v, i) => {
+    const d = Math.abs((v || 0) - (base.axes[i] ?? 0));
+    if (d > bestDelta) {
+      bestDelta = d;
+      best = { src: "axis", i, dir: v >= (base.axes[i] ?? 0) ? 1 : -1 };
+    }
+  });
+  return best;
+}
+
+function applyDetection(step, found) {
+  const d = remapState.draft;
+  if (step.kind === "button") {
+    if (found.src === "button") d.buttons[step.name] = found.i;
+    else d.axes[step.name + "_axisbtn"] = found.i; // raro: botão como eixo
+  } else if (step.kind === "axis") {
+    if (found.src === "axis") d.axes[step.name] = found.i;
+  } else if (step.kind === "trigger") {
+    d.triggers[step.name] = found.src === "axis"
+      ? { src: "axis", i: found.i, min: -1, max: 1 }
+      : { src: "button", i: found.i };
+  }
+}
+
+let remapCooldown = 0;
+function remapTick() {
+  if (!remapState.active) return;
+  const p = curPad();
+  if (p && remapState.step < REMAP_STEPS.length && remapCooldown <= 0) {
+    const found = detectChange(p);
+    if (found) {
+      applyDetection(REMAP_STEPS[remapState.step], found);
+      remapState.step++;
+      remapCooldown = 18; // ~0.3s de respiro entre passos (evita pular sozinho)
+      // re-snapshot do repouso pro próximo passo
+      remapState.base = { buttons: p.buttons.map((b) => b.value), axes: p.axes.slice() };
+      if (remapState.step >= REMAP_STEPS.length) return finishRemap();
+      renderRemap();
+    }
+  }
+  if (remapCooldown > 0) remapCooldown--;
+  requestAnimationFrame(remapTick);
+}
+
+async function finishRemap() {
+  remapState.active = false;
+  $("remap").classList.add("hidden");
+  padMaps[remapState.padId] = remapState.draft;
+  try {
+    await fetch("/api/gamepad-map", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: remapState.padId, map: remapState.draft }),
+    });
+    setStatus("controle remapeado e salvo no servidor");
+  } catch (e) {
+    setStatus("remapeado (mas falhou ao salvar no servidor)");
+  }
+}
+
+function skipRemapStep() {
+  if (!remapState.active) return;
+  remapState.step++;
+  if (remapState.step >= REMAP_STEPS.length) return finishRemap();
+  renderRemap();
+}
 
 // ---------- UI ----------
 function setStatus(s) {
@@ -548,6 +731,9 @@ $("full").addEventListener("click", () => {
 $("kbd").addEventListener("click", () => toggleOSK());
 $("menuToggle").addEventListener("click", () => showBar(barHidden()));
 $("sound").addEventListener("click", () => setAudio(!audioOn));
+$("remapBtn").addEventListener("click", () => startRemap());
+$("remapSkip").addEventListener("click", () => skipRemapStep());
+$("remapCancel").addEventListener("click", () => cancelRemap());
 
 // ---------- recall da UI: mover o mouse pro topo revela a barra ----------
 // Sem reservar tecla (não colide com Win/Ubuntu/celular). Em fullscreen ou com
@@ -791,6 +977,7 @@ function boot() {
   }
   buildOSK();
   loadConfig();
+  loadGamepadMaps();
   setStatus("pronto - toque em Conectar");
   statsLoop();
   pollPads();
@@ -808,6 +995,9 @@ if (typeof module !== "undefined" && module.exports) {
     setStatus, loadConfig, statsLoop, boot,
     sendChord, COMBOS, toggleOSK, oskPress, buildOSK,
     setKbdCapture, showBar, barHidden,
+    loadGamepadMaps, mapPad, readSource, startRemap, cancelRemap,
+    skipRemapStep, detectChange, applyDetection, finishRemap, remapTick,
+    renderRemap,
     __get: (k) => eval(k),
   };
 }

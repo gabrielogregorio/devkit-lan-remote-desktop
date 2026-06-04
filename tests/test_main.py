@@ -499,6 +499,40 @@ async def test_api_monitors(client, monkeypatch):
     assert data["audio_manual"] is False
 
 
+async def test_api_gamepad_map_get(client, monkeypatch):
+    monkeypatch.setattr(M.gamepad, "load_maps", lambda: {"Pad": {"buttons": {"a": 1}}})
+    resp = await client.get("/api/gamepad-map")
+    assert resp.status == 200
+    assert (await resp.json())["Pad"]["buttons"]["a"] == 1
+
+
+async def test_api_gamepad_map_post_ok(client, monkeypatch):
+    saved = {}
+    monkeypatch.setattr(M.gamepad, "save_map",
+                        lambda pid, m: saved.update({"id": pid, "map": m}))
+    resp = await client.post("/api/gamepad-map",
+                             json={"id": "Pad", "map": {"buttons": {"a": 2}}})
+    assert resp.status == 200
+    assert (await resp.json())["ok"] is True
+    assert saved == {"id": "Pad", "map": {"buttons": {"a": 2}}}
+
+
+async def test_api_gamepad_map_post_json_invalido(client):
+    resp = await client.post("/api/gamepad-map", data="naoeh json",
+                             headers={"Content-Type": "application/json"})
+    assert resp.status == 400
+    assert "error" in (await resp.json())
+
+
+async def test_api_gamepad_map_post_valueerror(client, monkeypatch):
+    def boom(pid, m):
+        raise ValueError("pad_id obrigatorio")
+    monkeypatch.setattr(M.gamepad, "save_map", boom)
+    resp = await client.post("/api/gamepad-map", json={"id": "", "map": {}})
+    assert resp.status == 400
+    assert "error" in (await resp.json())
+
+
 async def test_ws_video(client):
     # Envia mensagem regular (não-CLOSE/ERROR) para cobrir branch 247->246
     ws = await client.ws_connect("/ws/video")
