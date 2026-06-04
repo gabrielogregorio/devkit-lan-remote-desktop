@@ -52,8 +52,48 @@ class Preset:
 
     @property
     def gop(self) -> int:
-        # GOP ~1s: novos clientes sincronizam rapido (esperam <=1s por keyframe)
-        return self.fps
+        # GOP ~2s: keyframe e o frame mais pesado (pico de banda que o decoder do
+        # browser engasga). Espacar pra ~2s reduz pela metade esses picos; novos
+        # clientes ainda ressincronizam rapido (<=2s) e a UI pede reset no connect.
+        return max(2, self.fps * 2)
+
+
+@dataclass
+class VideoSettings:
+    """Parametros de video INDEPENDENTES (resolucao, fps, bitrate). A UI pode
+    mexer em cada um sozinho; os presets sao so atalhos que preenchem os tres."""
+    max_h: int
+    fps: int
+    bitrate: str
+    name: str = "custom"
+
+    @property
+    def gop(self) -> int:
+        return max(2, self.fps * 2)
+
+    @classmethod
+    def from_preset(cls, p: "Preset") -> "VideoSettings":
+        return cls(max_h=p.max_h, fps=p.fps, bitrate=p.bitrate, name=p.name)
+
+
+def _kbps(bitrate: str) -> int:
+    """'12M'/'3500k'/'1200' -> kbps inteiro (pra calcular bufsize)."""
+    s = str(bitrate).strip().lower()
+    try:
+        if s.endswith("m"):
+            return int(float(s[:-1]) * 1000)
+        if s.endswith("k"):
+            return int(float(s[:-1]))
+        return int(float(s) / 1000)
+    except ValueError:
+        return 8000
+
+
+def _lowlat_bufsize(bitrate: str) -> str:
+    """VBV pequeno (~1 frame de margem) p/ CBR de baixa latencia: o encoder nao
+    deixa o bitrate "estourar" num frame so e segura os picos que travam o
+    decoder. Usamos ~1/3 do bitrate/s (acima de 1 frame, abaixo de 1s)."""
+    return f"{max(500, _kbps(bitrate) // 3)}k"
 
 
 # Escala UNICA de qualidade (a UI manda 1 nivel; o audio segue junto - ver
@@ -157,6 +197,8 @@ class ScreenEncoder:
             "-i", f"{display}+{region['x']},{region['y']}",
         ]
 
+        bufsize = _lowlat_bufsize(preset.bitrate)
+
         if ENCODER == "nvenc":
             if scale_down:
                 cmd += ["-vf", f"scale=-2:{preset.max_h}"]
@@ -164,9 +206,15 @@ class ScreenEncoder:
                 "-c:v", "h264_nvenc",
                 "-preset", "p1", "-tune", "ull",
                 "-rc", "cbr", "-b:v", preset.bitrate, "-maxrate", preset.bitrate,
-                "-bufsize", preset.bitrate,
+                "-bufsize", bufsize,
                 "-g", str(preset.gop), "-bf", "0",
-                "-profile:v", "main", "-delay", "0", "-zerolatency", "1",
+                # spatial AQ: melhora a nitidez percebida pro MESMO bitrate (ajuda
+                # a rodar num bitrate menor, que e o que o decoder do browser pede).
+                "-spatial-aq", "1", "-aq-strength", "8",
+                # GOP fixo (sem scenecut) -> keyframes previsiveis; forced-idr p/
+                # o reset/ressync do cliente sempre cair num IDR de verdade.
+                "-no-scenecut", "1", "-forced-idr", "1",
+                "-profile:v", "high", "-delay", "0", "-zerolatency", "1",
                 "-pix_fmt", "yuv420p",
             ]
         elif ENCODER == "vaapi":
@@ -177,8 +225,9 @@ class ScreenEncoder:
                 "-vaapi_device", RENDER_NODE, "-vf", vf,
                 "-c:v", "h264_vaapi", "-rc_mode", "CBR",
                 "-b:v", preset.bitrate, "-maxrate", preset.bitrate,
+                "-bufsize", bufsize,
                 "-g", str(preset.gop), "-bf", "0",
-                "-profile:v", "main", "-async_depth", "1",
+                "-profile:v", "high", "-async_depth", "1",
             ]
             if self._low_power:
                 cmd += ["-low_power", "1"]
@@ -188,9 +237,11 @@ class ScreenEncoder:
             cmd += [
                 "-c:v", "libx264", "-preset", "ultrafast", "-tune", "zerolatency",
                 "-b:v", preset.bitrate, "-maxrate", preset.bitrate,
-                "-bufsize", preset.bitrate,
+                "-bufsize", bufsize,
                 "-g", str(preset.gop), "-bf", "0",
-                "-profile:v", "main", "-pix_fmt", "yuv420p",
+                # nal-hrd cbr + sliced threads: latencia menor no software tambem.
+                "-x264-params", "nal-hrd=cbr:sliced-threads=1:sync-lookahead=0",
+                "-profile:v", "high", "-pix_fmt", "yuv420p",
             ]
 
         cmd += [

@@ -53,7 +53,27 @@ def test_detect_x264(monkeypatch):
 # ───────────────────────── Preset.gop ─────────────────────────
 
 def test_preset_gop():
-    assert video.PRESETS["high"].gop == 60
+    # GOP ~2s (keyframe espacado p/ reduzir picos de banda no decoder do browser)
+    assert video.PRESETS["high"].gop == 120
+
+
+def test_video_settings_gop_e_from_preset():
+    vs = video.VideoSettings.from_preset(video.PRESETS["low"])
+    assert (vs.max_h, vs.fps, vs.bitrate) == (540, 60, "3500k")
+    assert vs.gop == 120
+    assert video.VideoSettings(max_h=720, fps=1, bitrate="7M").gop == 2  # piso 2
+
+
+def test_kbps_parse():
+    assert video._kbps("12M") == 12000
+    assert video._kbps("3500k") == 3500
+    assert video._kbps("8000") == 8  # bits -> kbps
+    assert video._kbps("lixo") == 8000  # fallback no ValueError
+
+
+def test_lowlat_bufsize():
+    assert video._lowlat_bufsize("12M") == "4000k"   # 12000/3
+    assert video._lowlat_bufsize("300k") == "500k"   # piso 500
 
 
 # ───────────────────────── _x_env ─────────────────────────

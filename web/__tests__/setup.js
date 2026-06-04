@@ -3,15 +3,17 @@ import { beforeEach, vi } from "vitest";
 const IDS = [
   "screen", "overlay", "status", "stats", "connect", "lock", "full",
   "kbd", "menuToggle", "sound", "preset", "monitor",
+  "vres", "vfps", "vbitrate", "audioPreset",
   "bar", "osk",
 ];
+const SELECTS = ["preset", "monitor", "vres", "vfps", "vbitrate", "audioPreset"];
 
 export function mountDOM() {
   document.body.innerHTML = "";
   for (const id of IDS) {
     const el =
       id === "screen" ? document.createElement("canvas") :
-      ["preset", "monitor"].includes(id) ? document.createElement("select") :
+      SELECTS.includes(id) ? document.createElement("select") :
       document.createElement("div");
     el.id = id;
     document.body.appendChild(el);
@@ -89,11 +91,16 @@ export function stubBrowser() {
     json: async () => ({
       presets: ["ultra", "high", "medium", "low", "potato"],
       current_preset: "high",
+      video: { res: 900, fps: 60, bitrate: "12M" },
+      res_options: [360, 480, 540, 720, 900, 1080],
+      fps_options: [30, 45, 60, 90, 120],
+      bitrate_options: ["1200k", "2500k", "3500k", "7M", "12M", "25M"],
       monitors: [{ index: 0, name: "HDMI-0", primary: true, w: 1920, h: 1080 }],
       current_monitor: null,
       audio_available: false,
       audio_presets: ["alta", "media", "baixa", "voz"],
       current_audio_preset: "media",
+      audio_manual: false,
     }),
   }));
 }

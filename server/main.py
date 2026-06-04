@@ -93,13 +93,19 @@ class Hub:
         self.clients: set[VideoClient] = set()
         self.encoder = video.ScreenEncoder(self._on_au)
         self.preset_name = video.DEFAULT_PRESET
+        # parametros de video INDEPENDENTES: comecam do preset default mas a UI
+        # pode mexer em resolucao/fps/bitrate cada um por si (set_video).
+        base = video.PRESETS.get(
+            self.preset_name, video.PRESETS[video.DEFAULT_PRESET])
+        self.settings = video.VideoSettings.from_preset(base)
         self.monitor_index: int | None = None
         self._running = False
         self._lock = asyncio.Lock()
 
     @property
-    def preset(self) -> video.Preset:
-        return video.PRESETS.get(self.preset_name, video.PRESETS[video.DEFAULT_PRESET])
+    def preset(self) -> video.VideoSettings:
+        # o encoder consome os parametros atuais (duck-type com Preset).
+        return self.settings
 
     @property
     def region(self) -> dict:
@@ -145,9 +151,26 @@ class Hub:
                   f"regiao={self.region['name']} {self.region['w']}x{self.region['h']}")
 
     async def set_preset(self, name: str):
-        if name in video.PRESETS and name != self.preset_name:
+        # atalho: aplica os tres parametros do preset de uma vez.
+        if name in video.PRESETS:
             self.preset_name = name
+            self.settings = video.VideoSettings.from_preset(video.PRESETS[name])
             await self._restart()
+
+    async def set_video(self, max_h=None, fps=None, bitrate=None):
+        """Override INDEPENDENTE de resolucao/fps/bitrate (sem trocar preset)."""
+        s = self.settings
+        new = video.VideoSettings(
+            max_h=int(max_h) if max_h is not None else s.max_h,
+            fps=int(fps) if fps is not None else s.fps,
+            bitrate=str(bitrate) if bitrate is not None else s.bitrate,
+            name="custom",
+        )
+        if (new.max_h, new.fps, new.bitrate) == (s.max_h, s.fps, s.bitrate):
+            return
+        self.settings = new
+        self.preset_name = "custom"
+        await self._restart()
 
     async def set_monitor(self, idx: int | None):
         if idx != self.monitor_index:
@@ -186,6 +209,9 @@ class AudioHub:
         self.clients: set[AudioClient] = set()
         self.encoder = audio.AudioEncoder(self._on_pkt)
         self.preset_name = audio.DEFAULT_AUDIO_PRESET
+        # manual=True quando o usuario escolheu o audio na mao -> o preset de
+        # video ('q') para de arrastar o audio junto.
+        self.manual = False
         self._running = False
         self._lock = asyncio.Lock()
 
@@ -235,15 +261,22 @@ async def index(request):
 async def api_monitors(request):
     hub: Hub = request.app["hub"]
     ahub: AudioHub = request.app["audio_hub"]
+    s = hub.settings
     return web.json_response({
         "encoder": video.ENCODER,
         "monitors": video.get_monitors(),
         "current_monitor": hub.monitor_index,
         "presets": list(video.PRESETS.keys()),
         "current_preset": hub.preset_name,
+        # parametros de video atuais + faixas validas pros controles separados
+        "video": {"res": s.max_h, "fps": s.fps, "bitrate": s.bitrate},
+        "res_options": [360, 480, 540, 720, 900, 1080],
+        "fps_options": [30, 45, 60, 90, 120],
+        "bitrate_options": ["1200k", "2500k", "3500k", "7M", "12M", "25M"],
         "audio_available": audio.audio_available(),
         "audio_presets": list(audio.AUDIO_PRESETS.keys()),
         "current_audio_preset": ahub.preset_name,
+        "audio_manual": ahub.manual,
     })
 
 
@@ -298,12 +331,22 @@ async def ws_input(request):
             continue
         t = data.get("t")
         if t == "q":
+            # atalho de preset: aplica video; o audio acompanha SO se o usuario
+            # nao tiver assumido o controle manual do audio (audio_manual).
             preset = data.get("preset", "")
             await hub.set_preset(preset)
-            # estado unico: o audio acompanha o nivel de qualidade do video
-            if preset in AUDIO_FOR_QUALITY:
+            if not ahub.manual and preset in AUDIO_FOR_QUALITY:
                 await ahub.set_preset(AUDIO_FOR_QUALITY[preset])
+        elif t == "vq":
+            # qualidade de VIDEO independente: {res, fps, bitrate} (qualquer subset)
+            await hub.set_video(
+                max_h=data.get("res"),
+                fps=data.get("fps"),
+                bitrate=data.get("bitrate"),
+            )
         elif t == "aq":
+            # qualidade de AUDIO independente: marca controle manual do audio.
+            ahub.manual = True
             await ahub.set_preset(data.get("preset", ""))
         elif t == "mon":
             idx = data.get("i")

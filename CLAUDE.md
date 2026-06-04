@@ -97,11 +97,25 @@ no `AudioContext`. Liga só com ≥1 ouvinte conectado.
 - `{"t":"md"/"mu","b":N}` botão down/up
 - `{"t":"w","x","y"}` scroll
 - `{"t":"k","code":"KeyA","down":true}` tecla
-- `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...]}` gamepad (standard mapping)
-- `{"t":"q","preset":"high"}` trocar qualidade - **estado único**: ajusta vídeo
-  E áudio juntos (o áudio segue `main.AUDIO_FOR_QUALITY`; reinicia os encoders)
-- `{"t":"aq","preset":"media"}` override manual só do áudio (não exposto na UI)
+- `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...],"lt":0..1,"rt":0..1}`
+  gamepad. `lt`/`rt` são os gatilhos enviados explícitos (o cliente detecta
+  mesmo em mapping não-standard, ex.: controle PS2/USB onde vêm como eixos); o
+  servidor cai pros `b[6]/b[7]` só se ausentes.
+- `{"t":"q","preset":"high"}` atalho de preset: aplica resolução+fps+bitrate de
+  uma vez. O áudio acompanha (`main.AUDIO_FOR_QUALITY`) **só** se o usuário ainda
+  não tiver mexido no áudio na mão (`AudioHub.manual`). Reinicia os encoders.
+- `{"t":"vq","res":720,"fps":60,"bitrate":"7M"}` qualidade de **vídeo
+  independente** (qualquer subconjunto dos 3 campos); vira preset "custom".
+- `{"t":"aq","preset":"media"}` qualidade de **áudio independente** (marca
+  `AudioHub.manual=True` → desliga o arrasto do `q`).
 - `{"t":"mon","i":0}` trocar monitor (`i:null` = primário)
+
+Encoder H.264 tunado p/ baixa latência: GOP ~2s (keyframe espaçado reduz picos
+que travam o decoder do browser), VBV pequeno (`_lowlat_bufsize` ~1/3 do
+bitrate/s), spatial-AQ no NVENC (nitidez no mesmo bitrate), profile `high`,
+`no-scenecut`+`forced-idr`. O encode (NVENC) sustenta 1080p60 a 1x; o
+gargalo prático costuma ser o **decode no browser**, por isso a régua útil é
+descer resolução/bitrate (controles separados).
 
 ## Convenções
 

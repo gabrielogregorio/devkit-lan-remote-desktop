@@ -590,11 +590,32 @@ document.querySelectorAll("[data-combo]").forEach((btn) => {
   });
 });
 
-// qualidade é um ESTADO ÚNICO: o servidor arrasta o áudio junto (ver
-// main.AUDIO_FOR_QUALITY). Feedback na tela pra a troca ser perceptível.
+// preset = atalho rápido (aplica resolução+fps+bitrate de uma vez; o áudio
+// acompanha se você não tiver escolhido áudio na mão). Depois você refina cada
+// parâmetro nos seletores separados abaixo.
 $("preset").addEventListener("change", (e) => {
   sendInput({ t: "q", preset: e.target.value });
-  setStatus(`qualidade: ${e.target.value}`);
+  setStatus(`preset: ${e.target.value}`);
+  // após aplicar o preset, recarrega pra refletir os novos res/fps/bitrate
+  setTimeout(loadConfig, 200);
+});
+// controles de vídeo INDEPENDENTES
+$("vres").addEventListener("change", (e) => {
+  sendInput({ t: "vq", res: Number(e.target.value) });
+  setStatus(`resolução: ${e.target.value}p`);
+});
+$("vfps").addEventListener("change", (e) => {
+  sendInput({ t: "vq", fps: Number(e.target.value) });
+  setStatus(`fps: ${e.target.value}`);
+});
+$("vbitrate").addEventListener("change", (e) => {
+  sendInput({ t: "vq", bitrate: e.target.value });
+  setStatus(`bitrate: ${e.target.value}`);
+});
+// áudio INDEPENDENTE
+$("audioPreset").addEventListener("change", (e) => {
+  sendInput({ t: "aq", preset: e.target.value });
+  setStatus(`áudio: ${e.target.value}`);
 });
 $("monitor").addEventListener("change", (e) => {
   const v = e.target.value;
@@ -683,33 +704,53 @@ function toggleOSK(force) {
   $("kbd").classList.toggle("on", show);
 }
 
+// preenche um <select> a partir de uma lista [{value,label}] marcando o atual.
+function fillSelect(id, items, current) {
+  const sel = $(id);
+  sel.innerHTML = "";
+  for (const it of items) {
+    const o = document.createElement("option");
+    o.value = String(it.value);
+    o.textContent = it.label;
+    if (String(it.value) === String(current)) o.selected = true;
+    sel.appendChild(o);
+  }
+}
+
 async function loadConfig() {
   try {
     const cfg = await (await fetch("/api/monitors")).json();
-    const ps = $("preset");
-    ps.innerHTML = "";
-    for (const p of cfg.presets) {
-      const o = document.createElement("option");
-      o.value = p;
-      o.textContent = p;
-      if (p === cfg.current_preset) o.selected = true;
-      ps.appendChild(o);
-    }
-    const ms = $("monitor");
-    ms.innerHTML = "";
-    for (const m of cfg.monitors) {
-      const o = document.createElement("option");
-      o.value = m.index;
-      o.textContent = `${m.name}${m.primary ? " ★" : ""} (${m.w}×${m.h})`;
-      if (m.index === cfg.current_monitor) o.selected = true;
-      ms.appendChild(o);
-    }
-    // áudio: sem seletor próprio - segue o nível de qualidade. Só liga/desliga.
+    fillSelect("preset",
+      cfg.presets.map((p) => ({ value: p, label: p })), cfg.current_preset);
+
+    // controles de vídeo independentes
+    const v = cfg.video || {};
+    fillSelect("vres",
+      (cfg.res_options || []).map((r) => ({ value: r, label: `${r}p` })), v.res);
+    fillSelect("vfps",
+      (cfg.fps_options || []).map((f) => ({ value: f, label: `${f} fps` })), v.fps);
+    fillSelect("vbitrate",
+      (cfg.bitrate_options || []).map((b) => ({ value: b, label: b })), v.bitrate);
+
+    // áudio: agora tem seletor próprio (qualidade independente)
+    fillSelect("audioPreset",
+      (cfg.audio_presets || []).map((a) => ({ value: a, label: a })),
+      cfg.current_audio_preset);
+
+    fillSelect("monitor",
+      cfg.monitors.map((m) => ({
+        value: m.index,
+        label: `${m.name}${m.primary ? " ★" : ""} (${m.w}×${m.h})`,
+      })), cfg.current_monitor);
+
     const sbtn = $("sound");
+    const audioPresetSel = $("audioPreset");
     if (cfg.audio_available && "AudioDecoder" in window) {
       sbtn.disabled = false;
+      audioPresetSel.disabled = false;
     } else {
       sbtn.disabled = true;
+      audioPresetSel.disabled = true;
       sbtn.title = cfg.audio_available
         ? "navegador sem AudioDecoder"
         : "sem áudio no servidor";

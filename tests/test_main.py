@@ -177,10 +177,14 @@ def hub_fixture(monkeypatch):
     return hub, inj, enc
 
 
-def test_hub_preset_valido_invalido(hub_fixture):
+def test_hub_preset_inicial_segue_default(hub_fixture):
     hub, _, _ = hub_fixture
-    hub.preset_name = "zzz"
-    assert hub.preset == video.PRESETS[video.DEFAULT_PRESET]
+    # settings iniciais espelham o preset default
+    base = video.PRESETS[video.DEFAULT_PRESET]
+    assert (hub.settings.max_h, hub.settings.fps, hub.settings.bitrate) == \
+        (base.max_h, base.fps, base.bitrate)
+    # a propriedade .preset entrega os settings atuais (duck-type c/ Preset)
+    assert hub.preset is hub.settings
 
 
 def test_hub_region(hub_fixture, monkeypatch):
@@ -287,18 +291,42 @@ async def test_hub_set_preset_muda(monkeypatch):
     assert hub.preset_name == "low"
 
 
-async def test_hub_set_preset_igual(hub_fixture):
+async def test_hub_set_preset_reaplica_mesmo_nome(hub_fixture):
+    # reselecionar o mesmo preset reaplica os 3 params (zera overrides custom)
+    # e reinicia o encoder.
     hub, _, enc = hub_fixture
     hub._running = True
     hub.preset_name = "high"
+    hub.settings = video.VideoSettings(max_h=123, fps=45, bitrate="1M", name="custom")
     await hub.set_preset("high")
-    enc.stop.assert_not_called()
+    enc.stop.assert_called()
+    assert hub.settings.max_h == video.PRESETS["high"].max_h
 
 
 async def test_hub_set_preset_invalido(hub_fixture):
     hub, _, enc = hub_fixture
     hub._running = True
     await hub.set_preset("nonexistent")
+    enc.stop.assert_not_called()
+
+
+async def test_hub_set_video_independente(hub_fixture):
+    # override só de fps: muda settings, vira "custom" e reinicia
+    hub, _, enc = hub_fixture
+    hub._running = True
+    before = hub.settings
+    await hub.set_video(fps=90)
+    assert hub.settings.fps == 90
+    assert hub.settings.max_h == before.max_h  # resto preservado
+    assert hub.preset_name == "custom"
+    enc.stop.assert_called()
+
+
+async def test_hub_set_video_sem_mudanca_nao_reinicia(hub_fixture):
+    hub, _, enc = hub_fixture
+    hub._running = True
+    s = hub.settings
+    await hub.set_video(max_h=s.max_h, fps=s.fps, bitrate=s.bitrate)
     enc.stop.assert_not_called()
 
 
@@ -465,6 +493,10 @@ async def test_api_monitors(client, monkeypatch):
     assert "monitors" in data
     assert "presets" in data
     assert "audio_presets" in data
+    # campos novos da qualidade separada
+    assert set(data["video"]) == {"res", "fps", "bitrate"}
+    assert data["res_options"] and data["fps_options"] and data["bitrate_options"]
+    assert data["audio_manual"] is False
 
 
 async def test_ws_video(client):
@@ -488,6 +520,8 @@ async def test_ws_input_comandos(client, monkeypatch):
 
     # preset change
     await ws.send_str(json.dumps({"t": "q", "preset": "low"}))
+    # video independente (vq): resolução, fps e bitrate
+    await ws.send_str(json.dumps({"t": "vq", "res": 720, "fps": 90, "bitrate": "7M"}))
     # audio preset change
     await ws.send_str(json.dumps({"t": "aq", "preset": "baixa"}))
     # monitor change (numérico)
@@ -524,6 +558,20 @@ async def test_ws_input_q_preset_sem_audio(client):
     await ws.send_str(json.dumps({"t": "q", "preset": "zzz"}))
     await asyncio.sleep(0.05)
     assert client.app["audio_hub"].preset_name == before
+    await ws.close()
+
+
+async def test_ws_input_aq_marca_manual_e_q_nao_arrasta(client):
+    # depois de um 'aq' manual, um 'q' de preset NAO muda mais o audio.
+    ws = await client.ws_connect("/ws/input")
+    await ws.send_str(json.dumps({"t": "aq", "preset": "voz"}))
+    await asyncio.sleep(0.03)
+    assert client.app["audio_hub"].manual is True
+    assert client.app["audio_hub"].preset_name == "voz"
+    # 'q' agora nao arrasta o audio (continua "voz")
+    await ws.send_str(json.dumps({"t": "q", "preset": "ultra"}))
+    await asyncio.sleep(0.03)
+    assert client.app["audio_hub"].preset_name == "voz"
     await ws.close()
 
 

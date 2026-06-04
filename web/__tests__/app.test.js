@@ -1436,6 +1436,42 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "q", preset: "low" });
   });
 
+  it("#vres change envia t:vq res:número", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const sel = document.getElementById("vres");
+    const opt = document.createElement("option");
+    opt.value = "720"; sel.appendChild(opt); sel.value = "720";
+    sel.dispatchEvent(new Event("change"));
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", res: 720 });
+  });
+
+  it("#vfps change envia t:vq fps:número", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const sel = document.getElementById("vfps");
+    const opt = document.createElement("option");
+    opt.value = "90"; sel.appendChild(opt); sel.value = "90";
+    sel.dispatchEvent(new Event("change"));
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", fps: 90 });
+  });
+
+  it("#vbitrate change envia t:vq bitrate:string", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const sel = document.getElementById("vbitrate");
+    const opt = document.createElement("option");
+    opt.value = "7M"; sel.appendChild(opt); sel.value = "7M";
+    sel.dispatchEvent(new Event("change"));
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", bitrate: "7M" });
+  });
+
+  it("#audioPreset change envia t:aq preset", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const sel = document.getElementById("audioPreset");
+    const opt = document.createElement("option");
+    opt.value = "baixa"; sel.appendChild(opt); sel.value = "baixa";
+    sel.dispatchEvent(new Event("change"));
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "aq", preset: "baixa" });
+  });
+
   it("#monitor change com valor numérico envia t:mon i:número", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("monitor");
@@ -1484,9 +1520,14 @@ describe("loadConfig", () => {
           { index: 1, name: "DP-1", primary: false, w: 1920, h: 1080 },
         ],
         current_monitor: 1,
+        video: { res: 720, fps: 60, bitrate: "7M" },
+        res_options: [540, 720, 1080],
+        fps_options: [30, 60, 120],
+        bitrate_options: ["3500k", "7M", "12M"],
         audio_available: true,
         audio_presets: ["alta", "media", "baixa", "voz"],
         current_audio_preset: "media",
+        audio_manual: false,
       }),
     }));
     await app.loadConfig();
@@ -1501,6 +1542,13 @@ describe("loadConfig", () => {
     // selected no preset atual
     const selected = Array.from(document.getElementById("preset").options).find(o => o.selected);
     expect(selected.value).toBe("high");
+    // controles de vídeo populados e com o valor atual selecionado
+    const vres = document.getElementById("vres");
+    expect(vres.options).toHaveLength(3);
+    expect(Array.from(vres.options).find(o => o.selected).value).toBe("720");
+    expect(document.getElementById("vfps").options).toHaveLength(3);
+    expect(document.getElementById("vbitrate").options).toHaveLength(3);
+    expect(document.getElementById("audioPreset").disabled).toBe(false);
   });
 
   it("áudio indisponível no servidor: desabilita botão com título correto", async () => {
@@ -1528,6 +1576,20 @@ describe("loadConfig", () => {
     const btn = document.getElementById("sound");
     expect(btn.disabled).toBe(true);
     expect(btn.title).toContain("AudioDecoder");
+  });
+
+  it("campos opcionais ausentes: usa listas vazias sem lançar", async () => {
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({
+        presets: [], current_preset: null,
+        monitors: [], current_monitor: null,
+        // video, *_options e audio_presets AUSENTES -> fallback || []
+        audio_available: false,
+      }),
+    }));
+    await expect(app.loadConfig()).resolves.not.toThrow();
+    expect(document.getElementById("vres").options).toHaveLength(0);
+    expect(document.getElementById("audioPreset").options).toHaveLength(0);
   });
 
   it("fetch lançando: console.warn é chamado, sem propagação", async () => {
