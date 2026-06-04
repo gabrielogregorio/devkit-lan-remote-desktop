@@ -128,8 +128,11 @@ class Injector:
         # so se o cliente nao mandou nada.
         lz = lt if lt is not None else bval(6)
         rz = rt if rt is not None else bval(7)
-        gp.write(e.EV_ABS, e.ABS_Z,  max(0, min(255, int(lz * 255))))
-        gp.write(e.EV_ABS, e.ABS_RZ, max(0, min(255, int(rz * 255))))
+        # round (nao int): replica o valor 0..1 -> 0..255 linear sem enviesar
+        # pra baixo. evdev deduplica valores iguais, entao reescrever o mesmo
+        # ABS nao gera evento -> sem flicker.
+        gp.write(e.EV_ABS, e.ABS_Z,  max(0, min(255, round(lz * 255))))
+        gp.write(e.EV_ABS, e.ABS_RZ, max(0, min(255, round(rz * 255))))
         gp.write(e.EV_ABS, e.ABS_HAT0Y, bpr(13) - bpr(12))
         gp.write(e.EV_ABS, e.ABS_HAT0X, bpr(15) - bpr(14))
         for i, code in _PAD_BTN.items():

@@ -1314,7 +1314,7 @@ describe("Gamepad / pollPads", () => {
     expect(msg.a).toEqual([0, 0, 0, 0]);
   });
 
-  it("mapping standard: gatilhos vêm de buttons[6]/[7] (com shaping)", () => {
+  it("mapping standard: gatilhos REPLICAM o valor cru de buttons[6]/[7]", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
     btns[6] = { pressed: true, value: 0.7 };
@@ -1322,31 +1322,49 @@ describe("Gamepad / pollPads", () => {
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    // shapeTrigger: deadzone 0.06, topo 0.95 -> reescala. 0.7 e 0.4 ficam
-    // proporcionais (não exatos), mas claramente acionados e monotônicos.
-    expect(msg.lt).toBeGreaterThan(msg.rt);
-    expect(msg.lt).toBeGreaterThan(0.6);
-    expect(msg.rt).toBeGreaterThan(0.3);
-    expect(msg.rt).toBeLessThan(0.5);
+    // fiel: sem deadzone/rescale -> exatamente o que o controle reporta
+    expect(msg.lt).toBe(0.7);
+    expect(msg.rt).toBe(0.4);
   });
 
-  it("gatilho em repouso (ruído) é zerado pela deadzone (sem double click)", () => {
+  it("gatilho leve é replicado fiel (sem deadzone que distorça)", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
-    btns[6] = { pressed: false, value: 0.03 }; // jitter abaixo da deadzone
+    const btns = Array.from({ length: 8 }, () => ({ pressed: true, value: 0.2 }));
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg.lt).toBe(0);
+    expect(msg.lt).toBe(0.2); // valor real preservado, não zerado
   });
 
-  it("gatilho quase no fundo satura em 1", () => {
+  it("gatilho quase no fundo NÃO é saturado prematuramente", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: true, value: 0.97 }));
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBe(0.97); // replica fiel, não força 1
+  });
+
+  it("gatilho acima de 1 é clampado em 1", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
+    btns[6] = { pressed: true, value: 1.3 }; // fonte fora de faixa
+    navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
     expect(msg.lt).toBe(1);
+  });
+
+  it("gatilho negativo/NaN cai pra 0 (clamp), sem inventar valor", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
+    btns[6] = { pressed: false, value: -0.2 };
+    btns[7] = { pressed: false, value: NaN };
+    navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBe(0);
+    expect(msg.rt).toBe(0);
   });
 
   it("sem perfil NÃO inventa gatilho a partir de eixos extras", () => {
@@ -1450,7 +1468,7 @@ describe("gamepad remap / mapPad", () => {
     const r = app.mapPad(p);
     expect(r.b[0]).toEqual({ p: true, v: 1 });   // 'a' lógico <- bruto 2
     expect(r.a[0]).toBeCloseTo(0.9, 2);          // lx <- eixo 3
-    expect(r.lt).toBeCloseTo(0.47, 1);           // button bruto 6 (0.5 shaped)
+    expect(r.lt).toBe(0.5);                       // button bruto 6 replicado fiel
     expect(r.rt).toBe(1);                        // eixo 5 (0->1) no fundo
 
     // mesmo controle em REPOUSO (eixo 5 = 0) -> gatilho rt deve ser 0

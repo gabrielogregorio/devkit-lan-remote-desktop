@@ -525,16 +525,14 @@ async function loadGamepadMaps() {
   }
 }
 
-// Gatilho preciso: deadzone embaixo (mata o jitter em repouso que vira
-// "double click") e satura no topo. Quantiza em degraus de 1/255 (resolução
-// real do ABS_Z do Xbox) pra não reenviar por ruído infinitesimal.
-const TRIG_DZ = 0.06; // abaixo disso = solto (0)
-const TRIG_TOP = 0.95; // acima disso = fundo (1)
-function shapeTrigger(v) {
-  if (!(v > TRIG_DZ)) return 0; // inclui NaN/negativo/repouso
-  if (v >= TRIG_TOP) return 1;
-  const n = (v - TRIG_DZ) / (TRIG_TOP - TRIG_DZ);
-  return Math.round(n * 255) / 255; // degrau de 1/255 (estável)
+// Gatilho FIEL: replica o valor cru 0..1 do controle, sem deadzone/rescale/
+// quantização. Distorcer (como antes) é o que gerava o "double click": a
+// deadzone/limiar oscilava perto da borda e cada cruzamento virava
+// apertar/soltar. O servidor faz round(v*255) -> ABS_Z; evdev já deduplica
+// valores iguais, então não há jitter a "suavizar". Só clampa em [0,1].
+function clamp01(v) {
+  if (!(v >= 0)) return 0; // NaN/negativo/undefined -> solto
+  return v > 1 ? 1 : v;
 }
 
 // lê um source de gatilho/eixo do perfil: {src:"axis",i,min,max} ou {src:"button",i}
@@ -565,8 +563,8 @@ function mapPad(p) {
     // partir de eixos sem perfil: controle PS2/USB costuma repousar o eixo em 0
     // (ou compartilhar um eixo LT/RT), e adivinhar gera gatilho fantasma /
     // double click. Pra esses, use o remap (🎮) que captura a fonte certa.
-    const lt = shapeTrigger(b[6] ? b[6].v : 0);
-    const rt = shapeTrigger(b[7] ? b[7].v : 0);
+    const lt = clamp01(b[6] ? b[6].v : 0);
+    const rt = clamp01(b[7] ? b[7].v : 0);
     return { a, b, lt, rt };
   }
   // com perfil: monta b[] na ordem lógica a partir dos índices mapeados
@@ -579,8 +577,8 @@ function mapPad(p) {
     const idx = m.axes?.[name];
     return idx != null ? (p.axes[idx] || 0) : 0;
   });
-  const lt = shapeTrigger(readSource(p, m.triggers?.lt));
-  const rt = shapeTrigger(readSource(p, m.triggers?.rt));
+  const lt = clamp01(readSource(p, m.triggers?.lt));
+  const rt = clamp01(readSource(p, m.triggers?.rt));
   return { a, b, lt, rt };
 }
 
@@ -595,7 +593,11 @@ function pollPads() {
     }
   if (p && !remapState.active) {
     const { a, b, lt, rt } = mapPad(p);
-    const snap = JSON.stringify([a, b, lt, rt]);
+    // dedup dos gatilhos pelo BYTE final (0..255) que o servidor vai escrever:
+    // evita reenviar por ruído < 1/255 (que o destino nem distingue) sem
+    // distorcer o valor cru enviado.
+    const ltByte = Math.round(lt * 255), rtByte = Math.round(rt * 255);
+    const snap = JSON.stringify([a, b, ltByte, rtByte]);
     if (snap !== padSnap) {
       padSnap = snap;
       sendInput({ t: "g", a, b, lt, rt });
