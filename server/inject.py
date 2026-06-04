@@ -109,7 +109,7 @@ class Injector:
         self.keyboard.syn()
 
     # ---------- gamepad ----------
-    def gamepad_state(self, axes: list, buttons: list):
+    def gamepad_state(self, axes: list, buttons: list, lt=None, rt=None):
         gp = self.gamepad
         if len(axes) >= 4:
             gp.write(e.EV_ABS, e.ABS_X,  _i16(axes[0] * 32767))
@@ -123,8 +123,13 @@ class Injector:
         def bpr(i):
             return 1 if (i < len(buttons) and buttons[i].get("p")) else 0
 
-        gp.write(e.EV_ABS, e.ABS_Z,  int(bval(6) * 255))
-        gp.write(e.EV_ABS, e.ABS_RZ, int(bval(7) * 255))
+        # Gatilhos: o cliente manda lt/rt explicitos (0..1) quando consegue
+        # detectar (mapping nao-padrao usa eixos). Cai pros buttons[6]/[7]
+        # so se o cliente nao mandou nada.
+        lz = lt if lt is not None else bval(6)
+        rz = rt if rt is not None else bval(7)
+        gp.write(e.EV_ABS, e.ABS_Z,  max(0, min(255, int(lz * 255))))
+        gp.write(e.EV_ABS, e.ABS_RZ, max(0, min(255, int(rz * 255))))
         gp.write(e.EV_ABS, e.ABS_HAT0Y, bpr(13) - bpr(12))
         gp.write(e.EV_ABS, e.ABS_HAT0X, bpr(15) - bpr(14))
         for i, code in _PAD_BTN.items():
@@ -147,7 +152,10 @@ class Injector:
         elif t == "k":
             self.key(msg["code"], msg["down"])
         elif t == "g":
-            self.gamepad_state(msg.get("a", []), msg.get("b", []))
+            self.gamepad_state(
+                msg.get("a", []), msg.get("b", []),
+                msg.get("lt"), msg.get("rt"),
+            )
 
     def close(self):
         for dev in (self.pointer, self.keyboard, self.gamepad):

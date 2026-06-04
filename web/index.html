@@ -32,13 +32,19 @@
     </span>
     <button id="sound" title="ligar/desligar áudio">🔇 som</button>
     <button id="lock" title="capturar mouse (jogos/FPS)">🎯 mouse</button>
-    <button id="kbd" title="abrir teclado (mobile)">⌨</button>
+    <button id="kbd" title="teclado virtual">⌨</button>
     <button id="full" title="tela cheia">⛶</button>
+    <span class="group combos">
+      <label>atalhos</label>
+      <button data-combo="altf4" title="fechar janela ativa">Alt+F4</button>
+      <button data-combo="alttab" title="alternar janelas">Alt+Tab</button>
+      <button data-combo="ctrlaltdel" title="Ctrl+Alt+Del">C+A+Del</button>
+      <button data-combo="super" title="menu de atividades (Super)">Super</button>
+    </span>
     <span id="stats" class="stats">-</span>
   </div>
 
-  <input id="hiddenKbd" autocomplete="off" autocorrect="off" autocapitalize="off"
-         spellcheck="false" aria-hidden="true">
+  <div id="osk" class="hidden"></div>
 
   <script src="/app.js"></script>
 </body>

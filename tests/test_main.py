@@ -516,6 +516,17 @@ async def test_ws_input_q_sincroniza_audio(client):
     await ws.close()
 
 
+async def test_ws_input_q_preset_sem_audio(client):
+    # 'q' com preset que NAO esta em AUDIO_FOR_QUALITY: audio nao muda
+    # (cobre o ramo falso do `if preset in AUDIO_FOR_QUALITY`)
+    before = client.app["audio_hub"].preset_name
+    ws = await client.ws_connect("/ws/input")
+    await ws.send_str(json.dumps({"t": "q", "preset": "zzz"}))
+    await asyncio.sleep(0.05)
+    assert client.app["audio_hub"].preset_name == before
+    await ws.close()
+
+
 def test_audio_for_quality_cobre_todos_presets():
     # todo nivel de video tem um audio correspondente (sem buracos no estado unico)
     assert set(M.AUDIO_FOR_QUALITY) == set(video.PRESETS)

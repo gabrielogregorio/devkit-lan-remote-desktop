@@ -16,6 +16,20 @@ describe("hex2", () => {
   it("zero", () => expect(app.hex2(0)).toBe("00"));
 });
 
+describe("wsBase / protocolo", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("sob https usa wss://", async () => {
+    vi.stubGlobal("location", { protocol: "https:", host: "h:8443" });
+    const httpsApp = await loadApp();
+    httpsApp.connectInput();
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    expect(ws.url.startsWith("wss://")).toBe(true);
+  });
+});
+
 describe("findNALs", () => {
   it("dois start codes retorna 2 entradas com type e hdr corretos", () => {
     const buf = new Uint8Array([0, 0, 1, 0x67, 0xAA, 0, 0, 1, 0x41, 0xBB]);
@@ -60,14 +74,121 @@ describe("codecFromSPS", () => {
   });
 });
 
-describe("charToCode", () => {
-  it("letra minúscula", () => expect(app.charToCode("a")).toBe("KeyA"));
-  it("letra maiúscula", () => expect(app.charToCode("Z")).toBe("KeyZ"));
-  it("dígito 5", () => expect(app.charToCode("5")).toBe("Digit5"));
-  it("dígito 0", () => expect(app.charToCode("0")).toBe("Digit0"));
-  it("espaço", () => expect(app.charToCode(" ")).toBe("Space"));
-  it("caractere especial retorna null", () => expect(app.charToCode("!")).toBeNull());
-  it("toUpperCase para minúsculas", () => expect(app.charToCode("e")).toBe("KeyE"));
+describe("sendChord", () => {
+  it("aperta na ordem e solta na ordem inversa", () => {
+    app.connectInput();
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    app.sendChord(["AltLeft", "F4"]);
+    const seq = ws.sent.map(JSON.parse);
+    expect(seq).toEqual([
+      { t: "k", code: "AltLeft", down: true },
+      { t: "k", code: "F4", down: true },
+      { t: "k", code: "F4", down: false },
+      { t: "k", code: "AltLeft", down: false },
+    ]);
+  });
+});
+
+describe("OSK (teclado virtual)", () => {
+  it("buildOSK monta as teclas uma vez só", () => {
+    app.buildOSK();
+    const n = document.getElementById("osk").querySelectorAll(".osk-key").length;
+    expect(n).toBeGreaterThan(0);
+    app.buildOSK(); // idempotente
+    expect(document.getElementById("osk").querySelectorAll(".osk-key").length).toBe(n);
+  });
+
+  it("toggleOSK alterna a classe hidden", () => {
+    app.buildOSK();
+    const k = document.getElementById("osk");
+    app.toggleOSK(true);
+    expect(k.classList.contains("hidden")).toBe(false);
+    app.toggleOSK(false);
+    expect(k.classList.contains("hidden")).toBe(true);
+    app.toggleOSK(); // sem arg: inverte (estava hidden -> mostra)
+    expect(k.classList.contains("hidden")).toBe(false);
+  });
+
+  it("oskPress de tecla normal envia down+up", () => {
+    app.connectInput();
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    const btn = document.createElement("button");
+    app.oskPress("KeyA", btn);
+    const seq = ws.sent.map(JSON.parse);
+    expect(seq).toContainEqual({ t: "k", code: "KeyA", down: true });
+    expect(seq).toContainEqual({ t: "k", code: "KeyA", down: false });
+  });
+
+  it("modificador sticky: trava, aplica numa tecla normal e solta", () => {
+    app.connectInput();
+    app.buildOSK();
+    const k = document.getElementById("osk");
+    const shift = k.querySelector('[data-code="ShiftLeft"]');
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    app.oskPress("ShiftLeft", shift); // trava
+    expect(shift.classList.contains("held")).toBe(true);
+    app.oskPress("KeyA", document.createElement("button")); // usa e libera
+    expect(shift.classList.contains("held")).toBe(false);
+    const downs = ws.sent.map(JSON.parse);
+    expect(downs).toContainEqual({ t: "k", code: "ShiftLeft", down: true });
+    expect(downs).toContainEqual({ t: "k", code: "ShiftLeft", down: false });
+  });
+
+  it("sticky clicado 2x destrava sem aplicar", () => {
+    app.connectInput();
+    app.buildOSK();
+    const k = document.getElementById("osk");
+    const ctrl = k.querySelector('[data-code="ControlLeft"]');
+    app.oskPress("ControlLeft", ctrl);
+    expect(ctrl.classList.contains("held")).toBe(true);
+    app.oskPress("ControlLeft", ctrl);
+    expect(ctrl.classList.contains("held")).toBe(false);
+  });
+
+  it("clicar numa tecla real do OSK envia a tecla", () => {
+    app.connectInput();
+    app.buildOSK();
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    document.getElementById("osk").querySelector('[data-code="KeyG"]').click();
+    const seq = ws.sent.map(s => JSON.parse(s));
+    expect(seq).toContainEqual({ t: "k", code: "KeyG", down: true });
+    expect(seq).toContainEqual({ t: "k", code: "KeyG", down: false });
+  });
+});
+
+describe("recall da barra (mouse no topo)", () => {
+  it("mousemove no topo mostra a barra", () => {
+    document.getElementById("bar").classList.add("hidden");
+    window.dispatchEvent(new MouseEvent("mousemove", { clientY: 2 }));
+    expect(app.barHidden()).toBe(false);
+  });
+  it("showBar(false) esconde", () => {
+    app.showBar(false);
+    expect(app.barHidden()).toBe(true);
+  });
+  it("auto-hide: some sozinha após o timer (sem pointer lock)", () => {
+    vi.useFakeTimers();
+    Object.defineProperty(document, "pointerLockElement", {
+      value: null, configurable: true,
+    });
+    window.dispatchEvent(new MouseEvent("mousemove", { clientY: 2 }));
+    expect(app.barHidden()).toBe(false);
+    vi.advanceTimersByTime(2600);
+    expect(app.barHidden()).toBe(true);
+    vi.useRealTimers();
+  });
+  it("touchstart no topo (mobile) revela a barra", () => {
+    document.getElementById("bar").classList.add("hidden");
+    const t = { clientY: 3, identifier: 1, clientX: 0, target: document.body };
+    const ev = new Event("touchstart");
+    ev.touches = [t];
+    window.dispatchEvent(ev);
+    expect(app.barHidden()).toBe(false);
+  });
 });
 
 describe("displayedRect", () => {
@@ -221,41 +342,134 @@ describe("onAU", () => {
     new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer;
   const deltaAU = () =>
     new Uint8Array([0, 0, 1, 0x61, 0x01]).buffer;
+  const flush = () => new Promise((r) => setTimeout(r, 0));
+
+  // A configuração é assíncrona (isConfigSupported). O 1º keyframe dispara a
+  // sondagem e NÃO decodifica; após configurado, os próximos AUs decodificam.
+  async function setup() {
+    app.onAU(spsAU()); // dispara configuração async
+    await flush();
+    expect(app.__get("configured")).toBe(true);
+  }
 
   it("AU sem SPS e configured=false retorna sem criar decoder", () => {
     app.onAU(deltaAU());
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("AU com SPS + IDR configura decoder e decodifica como key", () => {
-    app.onAU(spsAU());
+  it("1º SPS configura (async) sem decodificar; keyframe seguinte decodifica key", async () => {
+    await setup();
     const dec = app.__get("decoder");
-    expect(app.__get("configured")).toBe(true);
     expect(dec).not.toBeNull();
-    expect(dec.decoded).toHaveLength(1);
-    expect(dec.decoded[0].type).toBe("key");
+    app.onAU(spsAU());
+    expect(dec.decoded[dec.decoded.length - 1].type).toBe("key");
   });
 
-  it("AU delta após configured=true decodifica como delta", () => {
+  it("enquanto configura (async em andamento) o AU é ignorado", () => {
     app.onAU(spsAU());
+    expect(app.__get("configuring")).toBe(true);
+    const before = app.__get("decoder");
+    app.onAU(spsAU()); // chega no meio da sondagem -> early return
+    expect(app.__get("decoder")).toBe(before);
+  });
+
+  it("AU delta após configurado decodifica como delta", async () => {
+    await setup();
     const dec = app.__get("decoder");
     app.onAU(deltaAU());
-    expect(dec.decoded[1].type).toBe("delta");
+    expect(dec.decoded[dec.decoded.length - 1].type).toBe("delta");
   });
 
-  it("decode lançando chama resetDecoder", () => {
-    app.onAU(spsAU());
+  it("decode lançando chama resetDecoder", async () => {
+    await setup();
     const dec = app.__get("decoder");
     dec.decode = () => { throw new Error("decode fail"); };
     app.onAU(deltaAU());
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("acumula bytes", () => {
-    app.onAU(spsAU());
+  it("acumula bytes", async () => {
+    await setup();
     const b1 = app.__get("bytes");
     app.onAU(deltaAU());
     expect(app.__get("bytes")).toBeGreaterThan(b1);
+  });
+});
+
+describe("configureDecoder (fallback Chrome/Linux)", () => {
+  const codec = "avc1.640028";
+
+  it("usa prefer-hardware quando suportado", async () => {
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(true);
+    expect(app.__get("decoder").configured.hardwareAcceleration).toBe("prefer-hardware");
+  });
+
+  it("cai pra no-preference quando hardware não é suportado", async () => {
+    let calls = 0;
+    globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
+      calls++;
+      return { supported: cfg.hardwareAcceleration !== "prefer-hardware", config: cfg };
+    };
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(true);
+    expect(app.__get("decoder").configured.hardwareAcceleration).toBe("no-preference");
+    expect(calls).toBeGreaterThanOrEqual(2);
+  });
+
+  it("nenhum modo suportado: retorna false e seta status", async () => {
+    globalThis.VideoDecoder.isConfigSupported = async () => ({ supported: false });
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(false);
+  });
+
+  it("isConfigSupported lançando: tenta o próximo modo", async () => {
+    let n = 0;
+    globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
+      n++;
+      if (cfg.hardwareAcceleration === "prefer-hardware") throw new Error("boom");
+      return { supported: true, config: cfg };
+    };
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(true);
+    expect(n).toBeGreaterThanOrEqual(2);
+  });
+
+  it("usa as dimensões reais do canvas e sup.config quando presentes", async () => {
+    const canvas = document.getElementById("screen");
+    canvas.width = 1280;
+    canvas.height = 720;
+    let seen;
+    globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
+      seen = cfg;
+      return { supported: true, config: { ...cfg, marker: 1 } };
+    };
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(true);
+    expect(seen.codedWidth).toBe(1280);
+    expect(seen.codedHeight).toBe(720);
+    expect(app.__get("decoder").configured.marker).toBe(1);
+  });
+
+  it("sem sup.config usa o cfg local", async () => {
+    globalThis.VideoDecoder.isConfigSupported = async (cfg) => ({ supported: true });
+    const ok = await app.configureDecoder(codec);
+    expect(ok).toBe(true);
+    expect(app.__get("decoder").configured.codec).toBe(codec);
+  });
+
+  it("canvas sem dimensões usa fallback 1920x1080", async () => {
+    const canvas = document.getElementById("screen");
+    canvas.width = 0;
+    canvas.height = 0;
+    let seen;
+    globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
+      seen = cfg;
+      return { supported: true, config: cfg };
+    };
+    await app.configureDecoder(codec);
+    expect(seen.codedWidth).toBe(1920);
+    expect(seen.codedHeight).toBe(1080);
   });
 });
 
@@ -319,6 +533,21 @@ describe("ensureAudioDecoder / resetAudioDecoder", () => {
     expect(app.__get("audioDecoder")).not.toBe(first);
   });
 
+  it("callback output encaminha para playAudio", () => {
+    app.startAudioContext();
+    app.ensureAudioDecoder();
+    const ad = app.__get("audioDecoder");
+    const data = {
+      numberOfFrames: 960,
+      numberOfChannels: 2,
+      sampleRate: 48000,
+      copyTo: vi.fn(),
+      close: vi.fn(),
+    };
+    ad.cfg.output(data);
+    expect(data.close).toHaveBeenCalled();
+  });
+
   it("callback error chama resetAudioDecoder", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
@@ -376,6 +605,16 @@ describe("playAudio", () => {
     expect(data.copyTo).toHaveBeenCalled();
     expect(srcSpy.start).toHaveBeenCalled();
     expect(data.close).toHaveBeenCalled();
+  });
+
+  it("sem sampleRate: usa AUDIO_SR como fallback", () => {
+    app.startAudioContext();
+    const ctx = app.__get("audioCtx");
+    const bufSpy = vi.spyOn(ctx, "createBuffer");
+    const data = makeData({ sampleRate: undefined });
+    app.playAudio(data);
+    // 3º arg (sampleRate) caiu no fallback AUDIO_SR (48000), não em undefined
+    expect(bufSpy).toHaveBeenCalledWith(2, 960, 48000);
   });
 
   it("copyTo com format lançando: usa fallback sem format", () => {
@@ -590,20 +829,22 @@ describe("connectVideo", () => {
     expect(() => ws.onmessage({ data: "não é json" })).not.toThrow();
   });
 
-  it("onmessage string JSON válida mas t !== 'reset' não chama resetDecoder", () => {
+  it("onmessage string JSON válida mas t !== 'reset' não chama resetDecoder", async () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     app.onAU(new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer);
+    await new Promise((r) => setTimeout(r, 0)); // espera config async
     ws.onmessage({ data: JSON.stringify({ t: "outro" }) });
     // decoder NÃO foi resetado (configured ainda true)
     expect(app.__get("configured")).toBe(true);
   });
 
-  it("onmessage ArrayBuffer chama onAU", () => {
+  it("onmessage ArrayBuffer chama onAU", async () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     const au = new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer;
     ws.onmessage({ data: au });
+    await new Promise((r) => setTimeout(r, 0)); // espera config async
     expect(app.__get("configured")).toBe(true);
   });
 
@@ -925,6 +1166,15 @@ describe("Touch events", () => {
 describe("Keyboard events", () => {
   beforeEach(() => {
     app.connectInput();
+    app.setKbdCapture(true); // captura SÓ com foco no canvas; ativamos p/ testar
+  });
+
+  it("sem captura (foco fora do canvas) não envia", () => {
+    app.setKbdCapture(false);
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    ws.sent = [];
+    window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyA", bubbles: true, cancelable: true }));
+    expect(ws.sent).toHaveLength(0);
   });
 
   it("keydown envia t:k down:true", () => {
@@ -945,6 +1195,13 @@ describe("Keyboard events", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sentBefore = ws.sent.length;
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "F11", bubbles: true, cancelable: true }));
+    expect(ws.sent.length).toBe(sentBefore);
+  });
+
+  it("F11 no keyup também é ignorado", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const sentBefore = ws.sent.length;
+    window.dispatchEvent(new KeyboardEvent("keyup", { code: "F11", bubbles: true, cancelable: true }));
     expect(ws.sent.length).toBe(sentBefore);
   });
 
@@ -975,6 +1232,13 @@ describe("Gamepad / pollPads", () => {
     app.pollPads();
     expect(ws.sent).toHaveLength(0);
     expect(globalThis.requestAnimationFrame).toHaveBeenCalled();
+  });
+
+  it("sem getGamepads: usa lista vazia sem lançar", () => {
+    navigator.getGamepads = undefined;
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    expect(() => app.pollPads()).not.toThrow();
+    expect(ws.sent).toHaveLength(0);
   });
 
   it("pad com axes e buttons: envia t:g", () => {
@@ -1032,6 +1296,45 @@ describe("Gamepad / pollPads", () => {
     expect(msg.a).toEqual([0, 0, 0, 0]);
   });
 
+  it("mapping standard: gatilhos vêm de buttons[6]/[7]", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
+    btns[6] = { pressed: true, value: 0.7 };
+    btns[7] = { pressed: true, value: 0.4 };
+    navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBeCloseTo(0.7, 2);
+    expect(msg.rt).toBeCloseTo(0.4, 2);
+  });
+
+  it("controle PS2 USB (mapping não-standard): gatilhos vêm dos eixos extras", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    // adaptador PSX→USB: mapping "", gatilhos como axes[4]/[5] (-1 solto .. +1 fundo)
+    navigator.getGamepads = () => [{
+      mapping: "",
+      axes: [0, 0, 0, 0, 1.0, -1.0], // LT fundo, RT solto
+      buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })),
+    }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBeCloseTo(1.0, 2); // (1+1)/2
+    expect(msg.rt).toBeCloseTo(0.0, 2); // (-1+1)/2
+  });
+
+  it("PS2 USB com eixo de gatilho inválido cai pra 0", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    navigator.getGamepads = () => [{
+      mapping: "",
+      axes: [0, 0, 0, 0, undefined, NaN], // eixos de gatilho inválidos -> || 0
+      buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })),
+    }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBe(0);
+    expect(msg.rt).toBe(0);
+  });
+
   it("gamepadconnected event chama setStatus", () => {
     const ev = new Event("gamepadconnected");
     ev.gamepad = { id: "Xbox 360 Controller (XInput STANDARD GAMEPAD)" };
@@ -1084,20 +1387,33 @@ describe("UI - botões", () => {
     expect(document.exitFullscreen).toHaveBeenCalled();
   });
 
-  it("#kbd click foca no hiddenKbd", () => {
-    const kbd = document.getElementById("hiddenKbd");
-    const focusSpy = vi.spyOn(kbd, "focus");
+  it("#kbd click abre/fecha o teclado virtual", () => {
+    const osk = document.getElementById("osk");
+    osk.classList.add("hidden");
     document.getElementById("kbd").click();
-    expect(focusSpy).toHaveBeenCalled();
+    expect(osk.classList.contains("hidden")).toBe(false);
+    document.getElementById("kbd").click();
+    expect(osk.classList.contains("hidden")).toBe(true);
   });
 
-  it("#menuToggle togla classe 'hidden' no #bar", () => {
+  it("#menuToggle mostra/esconde a #bar", () => {
     const bar = document.getElementById("bar");
     bar.classList.remove("hidden");
     document.getElementById("menuToggle").click();
     expect(bar.classList.contains("hidden")).toBe(true);
     document.getElementById("menuToggle").click();
     expect(bar.classList.contains("hidden")).toBe(false);
+  });
+
+  it("botão de combo envia o chord", () => {
+    // usa o socket ativo (último /ws/input); o beforeEach já chamou connectInput
+    const inputs = globalThis.__sockets.filter(s => s.url.includes("/ws/input"));
+    const ws = inputs[inputs.length - 1];
+    ws.sent = [];
+    document.querySelector('[data-combo="altf4"]').click();
+    const seq = ws.sent.map(s => JSON.parse(s));
+    expect(seq).toContainEqual({ t: "k", code: "AltLeft", down: true });
+    expect(seq).toContainEqual({ t: "k", code: "F4", down: true });
   });
 
   it("#sound click chama setAudio(!audioOn)", () => {
@@ -1144,32 +1460,12 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "mon", i: null });
   });
 
-  it("#hiddenKbd input com letra envia keydown + keyup", () => {
-    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    const input = document.getElementById("hiddenKbd");
-    input.dispatchEvent(new InputEvent("input", { data: "a", bubbles: true }));
-    const msgs = ws.sent.map(s => JSON.parse(s));
-    expect(msgs.some(m => m.t === "k" && m.code === "KeyA" && m.down === true)).toBe(true);
-    expect(msgs.some(m => m.t === "k" && m.code === "KeyA" && m.down === false)).toBe(true);
-    expect(input.value).toBe("");
-  });
-
-  it("#hiddenKbd input com e.data=null não envia nada", () => {
-    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    const sentBefore = ws.sent.length;
-    const input = document.getElementById("hiddenKbd");
-    input.dispatchEvent(new InputEvent("input", { data: null, bubbles: true }));
-    expect(ws.sent.length).toBe(sentBefore);
-    expect(input.value).toBe("");
-  });
-
-  it("#hiddenKbd input com caractere sem mapa não envia nada", () => {
-    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    const sentBefore = ws.sent.length;
-    document.getElementById("hiddenKbd").dispatchEvent(
-      new InputEvent("input", { data: "!", bubbles: true })
-    );
-    expect(ws.sent.length).toBe(sentBefore);
+  it("foco/blur no canvas liga/desliga a captura de teclado", () => {
+    const canvas = document.getElementById("screen");
+    canvas.dispatchEvent(new FocusEvent("focus"));
+    expect(app.__get("kbdCapture")).toBe(true);
+    canvas.dispatchEvent(new FocusEvent("blur"));
+    expect(app.__get("kbdCapture")).toBe(false);
   });
 });
 
@@ -1183,8 +1479,11 @@ describe("loadConfig", () => {
       json: async () => ({
         presets: ["ultra", "high", "medium", "low", "potato"],
         current_preset: "high",
-        monitors: [{ index: 0, name: "HDMI-0", primary: true, w: 1920, h: 1080 }],
-        current_monitor: null,
+        monitors: [
+          { index: 0, name: "HDMI-0", primary: true, w: 1920, h: 1080 },
+          { index: 1, name: "DP-1", primary: false, w: 1920, h: 1080 },
+        ],
+        current_monitor: 1,
         audio_available: true,
         audio_presets: ["alta", "media", "baixa", "voz"],
         current_audio_preset: "media",
@@ -1192,7 +1491,12 @@ describe("loadConfig", () => {
     }));
     await app.loadConfig();
     expect(document.getElementById("preset").options).toHaveLength(5);
-    expect(document.getElementById("monitor").options).toHaveLength(1);
+    const monOpts = document.getElementById("monitor").options;
+    expect(monOpts).toHaveLength(2);
+    // primário recebe ★, o outro não; o current_monitor=1 fica selecionado
+    expect(monOpts[0].textContent).toContain("★");
+    expect(monOpts[1].textContent).not.toContain("★");
+    expect(monOpts[1].selected).toBe(true);
     expect(document.getElementById("sound").disabled).toBe(false);
     // selected no preset atual
     const selected = Array.from(document.getElementById("preset").options).find(o => o.selected);

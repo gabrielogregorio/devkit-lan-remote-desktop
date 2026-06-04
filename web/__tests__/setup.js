@@ -3,7 +3,7 @@ import { beforeEach, vi } from "vitest";
 const IDS = [
   "screen", "overlay", "status", "stats", "connect", "lock", "full",
   "kbd", "menuToggle", "sound", "preset", "monitor",
-  "hiddenKbd", "bar",
+  "bar", "osk",
 ];
 
 export function mountDOM() {
@@ -12,10 +12,18 @@ export function mountDOM() {
     const el =
       id === "screen" ? document.createElement("canvas") :
       ["preset", "monitor"].includes(id) ? document.createElement("select") :
-      id === "hiddenKbd" ? document.createElement("input") :
       document.createElement("div");
     el.id = id;
     document.body.appendChild(el);
+  }
+  // #osk começa escondido (como no HTML real)
+  document.getElementById("osk").className = "hidden";
+  // botões de combo (data-combo) que app.js liga no boot
+  for (const c of ["altf4", "alttab", "ctrlaltdel", "super"]) {
+    const b = document.createElement("button");
+    b.dataset.combo = c;
+    b.textContent = c;
+    document.getElementById("bar").appendChild(b);
   }
   const cv = document.getElementById("screen");
   cv.getContext = () => ({ drawImage: vi.fn() });
@@ -49,6 +57,7 @@ export function stubBrowser() {
     configure(c) { this.state = "configured"; this.configured = c; }
     decode(chunk) { (this.decoded = this.decoded || []).push(chunk); }
     close() { this.state = "closed"; }
+    static async isConfigSupported(cfg) { return { supported: true, config: cfg }; }
   };
   globalThis.AudioDecoder = class {
     constructor(cfg) { this.cfg = cfg; this.state = "unconfigured"; }

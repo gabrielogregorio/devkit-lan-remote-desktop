@@ -15,6 +15,7 @@ let videoWS = null,
   inputWS = null;
 let decoder = null,
   configured = false,
+  configuring = false,
   codecStr = null;
 let tsCounter = 0;
 let frames = 0,
@@ -74,11 +75,45 @@ function ensureDecoder() {
 
 function resetDecoder() {
   configured = false;
+  configuring = false;
   codecStr = null;
   try {
     if (decoder && decoder.state !== "closed") decoder.close();
   } catch (e) {}
   decoder = null;
+}
+
+// Chrome no Linux costuma falhar com hardwareAcceleration:"prefer-hardware"
+// (caminho VA-API/NVDEC instável) onde Firefox aceita. Então sondamos com
+// isConfigSupported() e caímos pra "no-preference" -> "prefer-software". A
+// configuração roda async; bufferizamos o 1º keyframe até o decoder ficar pronto.
+async function configureDecoder(codec) {
+  const bases = [
+    { hardwareAcceleration: "prefer-hardware" },
+    { hardwareAcceleration: "no-preference" },
+    { hardwareAcceleration: "prefer-software" },
+  ];
+  for (const extra of bases) {
+    const cfg = {
+      codec,
+      optimizeForLatency: true,
+      codedWidth: canvas.width || 1920,
+      codedHeight: canvas.height || 1080,
+      ...extra,
+    };
+    try {
+      const sup = await VideoDecoder.isConfigSupported(cfg);
+      if (!sup || !sup.supported) continue;
+      ensureDecoder();
+      decoder.configure(sup.config || cfg);
+      return true;
+    } catch (e) {
+      console.warn("configure falhou em", extra.hardwareAcceleration, e);
+      resetDecoder();
+    }
+  }
+  setStatus("este navegador não conseguiu iniciar o decoder H.264");
+  return false;
 }
 
 function onAU(buf) {
@@ -88,16 +123,16 @@ function onAU(buf) {
   const isKey = nals.some((n) => n.type === 5 || n.type === 7);
 
   if (!configured) {
+    if (configuring) return; // sondagem async em andamento; espera o próximo keyframe
     const sps = nals.find((n) => n.type === 7);
     if (!sps) return;
     codecStr = codecFromSPS(au, sps.hdr);
-    ensureDecoder();
-    decoder.configure({
-      codec: codecStr,
-      optimizeForLatency: true,
-      hardwareAcceleration: "prefer-hardware",
+    configuring = true;
+    configureDecoder(codecStr).then((ok) => {
+      configuring = false;
+      configured = ok;
     });
-    configured = true;
+    return; // este AU serve só pra configurar; o próximo keyframe começa o decode
   }
 
   try {
@@ -402,18 +437,61 @@ canvas.addEventListener(
 );
 
 // ---------- teclado ----------
-window.addEventListener("keydown", (e) => {
-  if (!inputWS || inputWS.readyState !== 1) return;
-  if (e.code === "F11") return;
-  e.preventDefault();
-  sendInput({ t: "k", code: e.code, down: true });
-});
-window.addEventListener("keyup", (e) => {
-  if (!inputWS || inputWS.readyState !== 1) return;
-  if (e.code === "F11") return;
-  e.preventDefault();
-  sendInput({ t: "k", code: e.code, down: false });
-});
+// Captura SÓ com foco no canvas: clicar na tela remota manda o teclado físico
+// pro PC; clicar fora (ou Esc-do-foco) devolve o controle ao navegador local.
+// Assim Tab/F-keys/atalhos não vazam pro browser enquanto você está "dentro".
+let kbdCapture = false;
+canvas.tabIndex = 0; // permite foco/blur no canvas
+
+function setKbdCapture(on) {
+  kbdCapture = on;
+  document.body.classList.toggle("kbd-capture", on);
+  if (on) setStatus("teclado capturado - clique fora p/ liberar");
+}
+canvas.addEventListener("focus", () => setKbdCapture(true));
+canvas.addEventListener("blur", () => setKbdCapture(false));
+canvas.addEventListener("mousedown", () => canvas.focus());
+
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (!kbdCapture || !inputWS || inputWS.readyState !== 1) return;
+    // F11 fica reservado ao fullscreen do navegador local; nunca enviado.
+    if (e.code === "F11") return;
+    e.preventDefault();
+    sendInput({ t: "k", code: e.code, down: true });
+  },
+  true,
+);
+window.addEventListener(
+  "keyup",
+  (e) => {
+    if (!kbdCapture || !inputWS || inputWS.readyState !== 1) return;
+    if (e.code === "F11") return;
+    e.preventDefault();
+    sendInput({ t: "k", code: e.code, down: false });
+  },
+  true,
+);
+
+// ---------- combos / teclado virtual ----------
+// Envia uma sequência de teclas como um chord: aperta todas em ordem, solta na
+// ordem inversa. Não depende de atalho local (não colide com Win/Ubuntu/celular).
+function sendChord(codes) {
+  for (const c of codes) sendInput({ t: "k", code: c, down: true });
+  for (let i = codes.length - 1; i >= 0; i--)
+    sendInput({ t: "k", code: codes[i], down: false });
+}
+
+const COMBOS = {
+  altf4: ["AltLeft", "F4"],
+  ctrlaltdel: ["ControlLeft", "AltLeft", "Delete"],
+  alttab: ["AltLeft", "Tab"],
+  super: ["MetaLeft"],
+  ctrlc: ["ControlLeft", "KeyC"],
+  ctrlv: ["ControlLeft", "KeyV"],
+  esc: ["Escape"],
+};
 
 // ---------- gamepad ----------
 let padSnap = "";
@@ -428,10 +506,26 @@ function pollPads() {
   if (p) {
     const a = [p.axes[0] || 0, p.axes[1] || 0, p.axes[2] || 0, p.axes[3] || 0];
     const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
-    const snap = JSON.stringify([a, b]);
+    // Gatilhos (LT/RT): no mapping "standard" são buttons[6]/[7] (analógicos).
+    // Mas em mappings não-padrão (Firefox/Linux com alguns drivers) eles chegam
+    // como EIXOS extras. Detectamos e mandamos explicitamente em `lt`/`rt` 0..1
+    // pro servidor não depender do índice de botão.
+    let lt = b[6] ? b[6].v : 0;
+    let rt = b[7] ? b[7].v : 0;
+    if (p.mapping !== "standard") {
+      // heurística: eixos além dos 4 sticks costumam ser os gatilhos (−1 solto..+1 fundo)
+      const ax = p.axes;
+      if (ax.length >= 6) {
+        lt = Math.max(lt, (ax[4] + 1) / 2 || 0);
+        rt = Math.max(rt, (ax[5] + 1) / 2 || 0);
+      }
+    }
+    lt = +lt.toFixed(3);
+    rt = +rt.toFixed(3);
+    const snap = JSON.stringify([a, b, lt, rt]);
     if (snap !== padSnap) {
       padSnap = snap;
-      sendInput({ t: "g", a, b });
+      sendInput({ t: "g", a, b, lt, rt });
     }
   }
   requestAnimationFrame(pollPads);
@@ -451,11 +545,50 @@ $("full").addEventListener("click", () => {
   if (!document.fullscreenElement) document.documentElement.requestFullscreen();
   else document.exitFullscreen();
 });
-$("kbd").addEventListener("click", () => $("hiddenKbd").focus());
-$("menuToggle").addEventListener("click", () =>
-  $("bar").classList.toggle("hidden"),
-);
+$("kbd").addEventListener("click", () => toggleOSK());
+$("menuToggle").addEventListener("click", () => showBar(barHidden()));
 $("sound").addEventListener("click", () => setAudio(!audioOn));
+
+// ---------- recall da UI: mover o mouse pro topo revela a barra ----------
+// Sem reservar tecla (não colide com Win/Ubuntu/celular). Em fullscreen ou com
+// a barra escondida, encostar o cursor no topo (≤6% da altura) traz tudo de volta.
+function barHidden() {
+  return $("bar").classList.contains("hidden");
+}
+function showBar(on) {
+  $("bar").classList.toggle("hidden", !on);
+}
+let barAutoHide = null;
+window.addEventListener("mousemove", (e) => {
+  if (e.clientY <= Math.max(40, window.innerHeight * 0.06)) {
+    showBar(true);
+    clearTimeout(barAutoHide);
+    // some sozinha depois de 2.5s se o mouse sair do topo
+    barAutoHide = setTimeout(() => {
+      if (document.pointerLockElement !== canvas) showBar(false);
+    }, 2500);
+  }
+});
+// no mobile: swipe de cima pra baixo (ou toque na faixa superior) revela a barra
+window.addEventListener(
+  "touchstart",
+  (e) => {
+    const t = e.touches[0];
+    if (t && t.clientY <= Math.max(40, window.innerHeight * 0.06)) showBar(true);
+  },
+  { passive: true },
+);
+
+// ---------- combos (chords) ----------
+document.querySelectorAll("[data-combo]").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    const combo = COMBOS[btn.dataset.combo];
+    if (combo) {
+      sendChord(combo);
+      setStatus(`enviado: ${btn.textContent.trim()}`);
+    }
+  });
+});
 
 // qualidade é um ESTADO ÚNICO: o servidor arrasta o áudio junto (ver
 // main.AUDIO_FOR_QUALITY). Feedback na tela pra a troca ser perceptível.
@@ -468,22 +601,86 @@ $("monitor").addEventListener("change", (e) => {
   sendInput({ t: "mon", i: v === "" ? null : Number(v) });
 });
 
-$("hiddenKbd").addEventListener("input", (e) => {
-  const ch = e.data;
-  if (ch) {
-    const code = charToCode(ch);
-    if (code) {
-      sendInput({ t: "k", code, down: true });
-      sendInput({ t: "k", code, down: false });
+// ---------- teclado virtual (OSK) ----------
+// Painel clicável de PC completo: cada tecla manda KeyboardEvent.code direto.
+// Modificadores (Shift/Ctrl/Alt/Meta) são "sticky": clica -> fica preso até a
+// próxima tecla normal (ou clica de novo pra travar). Funciona em mobile e
+// complementa o teclado físico (que continua valendo com foco no canvas).
+const OSK_ROWS = [
+  ["Escape:Esc", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F12"],
+  ["Backquote:`", "Digit1:1", "Digit2:2", "Digit3:3", "Digit4:4", "Digit5:5",
+   "Digit6:6", "Digit7:7", "Digit8:8", "Digit9:9", "Digit0:0", "Minus:-",
+   "Equal:=", "Backspace:⌫"],
+  ["Tab:↹", "KeyQ:q", "KeyW:w", "KeyE:e", "KeyR:r", "KeyT:t", "KeyY:y",
+   "KeyU:u", "KeyI:i", "KeyO:o", "KeyP:p", "BracketLeft:[", "BracketRight:]",
+   "Backslash:\\"],
+  ["CapsLock:⇪", "KeyA:a", "KeyS:s", "KeyD:d", "KeyF:f", "KeyG:g", "KeyH:h",
+   "KeyJ:j", "KeyK:k", "KeyL:l", "Semicolon:;", "Quote:'", "Enter:⏎"],
+  ["ShiftLeft:⇧", "KeyZ:z", "KeyX:x", "KeyC:c", "KeyV:v", "KeyB:b", "KeyN:n",
+   "KeyM:m", "Comma:,", "Period:.", "Slash:/", "ArrowUp:↑", "ShiftRight:⇧"],
+  ["ControlLeft:Ctrl", "MetaLeft:Super", "AltLeft:Alt", "Space:␣",
+   "AltRight:AltGr", "ArrowLeft:←", "ArrowDown:↓", "ArrowRight:→"],
+];
+const STICKY = new Set([
+  "ShiftLeft", "ShiftRight", "ControlLeft", "AltLeft", "AltRight",
+  "MetaLeft", "CapsLock",
+]);
+const stickyHeld = new Set();
+
+function buildOSK() {
+  const k = $("osk");
+  if (k.childElementCount) return; // já montado
+  for (const row of OSK_ROWS) {
+    const r = document.createElement("div");
+    r.className = "osk-row";
+    for (const spec of row) {
+      const [code, label] = spec.includes(":") ? spec.split(":") : [spec, spec];
+      const b = document.createElement("button");
+      b.className = "osk-key";
+      b.textContent = label;
+      b.dataset.code = code;
+      if (STICKY.has(code)) b.classList.add("sticky");
+      if (code === "Space") b.classList.add("wide");
+      b.addEventListener("click", (ev) => {
+        ev.preventDefault();
+        oskPress(code, b);
+      });
+      r.appendChild(b);
     }
+    k.appendChild(r);
   }
-  e.target.value = "";
-});
-function charToCode(ch) {
-  if (/[a-zA-Z]/.test(ch)) return "Key" + ch.toUpperCase();
-  if (/[0-9]/.test(ch)) return "Digit" + ch;
-  if (ch === " ") return "Space";
-  return null;
+}
+
+function oskPress(code, btn) {
+  if (STICKY.has(code)) {
+    if (stickyHeld.has(code)) {
+      stickyHeld.delete(code);
+      btn.classList.remove("held");
+      sendInput({ t: "k", code, down: false });
+    } else {
+      stickyHeld.add(code);
+      btn.classList.add("held");
+      sendInput({ t: "k", code, down: true });
+    }
+    return;
+  }
+  // tecla normal: aperta, solta; depois libera os modificadores sticky
+  sendInput({ t: "k", code, down: true });
+  sendInput({ t: "k", code, down: false });
+  for (const m of stickyHeld) {
+    sendInput({ t: "k", code: m, down: false });
+    const mb = $("osk").querySelector(`[data-code="${m}"]`);
+    if (mb) mb.classList.remove("held");
+  }
+  stickyHeld.clear();
+}
+
+function toggleOSK(force) {
+  buildOSK();
+  const k = $("osk");
+  const show = force === undefined ? k.classList.contains("hidden") : force;
+  k.classList.toggle("hidden", !show);
+  $("kbd").classList.toggle("on", show);
 }
 
 async function loadConfig() {
@@ -547,10 +744,11 @@ function statsLoop() {
 // ---------- boot ----------
 function boot() {
   if (!("VideoDecoder" in window)) {
-    setStatus("Sem WebCodecs neste navegador. Use Chrome/Edge via HTTPS.");
+    setStatus("Sem WebCodecs neste navegador. Use Chrome/Firefox/Edge via HTTPS.");
     $("connect").disabled = true;
     return;
   }
+  buildOSK();
   loadConfig();
   setStatus("pronto - toque em Conectar");
   statsLoop();
@@ -560,15 +758,20 @@ function boot() {
 // ---------- boot / test seam ----------
 if (typeof module !== "undefined" && module.exports) {
   module.exports = {
-    hex2, findNALs, codecFromSPS,
+    hex2, findNALs, codecFromSPS, configureDecoder,
     ensureDecoder, resetDecoder, onAU,
     startAudioContext, ensureAudioDecoder, resetAudioDecoder,
     playAudio, onAudioPacket, connectAudio, setAudio,
     connect, connectVideo, connectInput, sendInput,
     flushMove, normFromEvent, displayedRect, pollPads,
-    setStatus, charToCode, loadConfig, statsLoop, boot,
+    setStatus, loadConfig, statsLoop, boot,
+    sendChord, COMBOS, toggleOSK, oskPress, buildOSK,
+    setKbdCapture, showBar, barHidden,
     __get: (k) => eval(k),
   };
-} else {
+}
+/* v8 ignore start -- so roda no browser real (sem CommonJS); coberto no e2e Playwright */
+else {
   boot();
 }
+/* v8 ignore stop */

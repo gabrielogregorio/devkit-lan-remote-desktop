@@ -160,14 +160,83 @@ button:disabled {
   font-size: 16px;
 }
 
-#hiddenKbd {
+#kbd.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* borda que indica que o teclado físico está sendo capturado p/ o PC remoto */
+body.kbd-capture #stage {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+
+#bar .combos {
+  flex-wrap: wrap;
+}
+
+#bar .combos button {
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+/* ---------- teclado virtual ---------- */
+#osk {
   position: fixed;
-  opacity: 0;
-  pointer-events: none;
-  left: -9999px;
-  top: 0;
-  width: 1px;
-  height: 1px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 8px 6px calc(8px + env(safe-area-inset-bottom, 0px));
+  background: rgba(15, 18, 24, .97);
+  border-top: 1px solid #2a323d;
+  transition: transform .2s ease;
+}
+
+#osk.hidden {
+  transform: translateY(110%);
+}
+
+.osk-row {
+  display: flex;
+  gap: 5px;
+  justify-content: center;
+}
+
+.osk-key {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: 70px;
+  padding: 10px 4px;
+  font-size: 14px;
+  text-align: center;
+  background: #232a33;
+  border: 1px solid #303945;
+  border-radius: 7px;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.osk-key.wide {
+  flex: 6 1 0;
+  max-width: none;
+}
+
+.osk-key.sticky {
+  background: #2a323d;
+}
+
+.osk-key.held {
+  background: var(--accent);
+  color: #04121f;
+  border-color: var(--accent);
+}
+
+.osk-key:active {
+  background: var(--accent);
+  color: #04121f;
 }
 
 @media (max-width: 640px) {
