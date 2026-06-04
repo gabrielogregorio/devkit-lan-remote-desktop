@@ -552,22 +552,28 @@ function readSource(p, s) {
   return Math.min(1, Math.max(0, (v - min) / span));
 }
 
-// Traduz o pad bruto -> formato padrão usando o perfil salvo (se houver).
+// Passagem DIRETA: o navegador já entrega o controle na ordem padrão W3C
+// ("standard mapping"). Pra um Xbox isso é exatamente a ordem que o servidor
+// quer (b[0]=A..b[16]=Guide, a[0..3]=sticks, b[6]/b[7]=gatilhos analógicos).
+// Então repassamos byte a byte, sem mexer. É o caminho de QUALQUER controle
+// que o browser reconheça (Xbox, DualShock, etc.).
+function passthroughPad(p) {
+  const a = [p.axes[0] || 0, p.axes[1] || 0, p.axes[2] || 0, p.axes[3] || 0];
+  const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
+  const lt = clamp01(p.buttons[6] ? p.buttons[6].value : 0);
+  const rt = clamp01(p.buttons[7] ? p.buttons[7].value : 0);
+  return { a, b, lt, rt };
+}
+
+// Traduz o pad bruto -> formato padrão.
+// REGRA: controle "standard" (Xbox e a maioria) passa DIRETO, sem perfil nenhum
+// (um Xbox jamais precisa de remap). Só controle NÃO-standard (PS2/USB clone)
+// usa o perfil de remap salvo - e mesmo assim, só se existir.
 function mapPad(p) {
+  if (p.mapping === "standard") return passthroughPad(p);
   const m = padMaps[p.id];
-  if (!m) {
-    // sem perfil: heurística padrão (standard + eixos extras p/ gatilhos)
-    const a = PAD_AXES.map((_, i) => p.axes[i] || 0);
-    const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
-    // gatilhos só dos buttons[6]/[7] (mapping standard). NÃO inventamos a
-    // partir de eixos sem perfil: controle PS2/USB costuma repousar o eixo em 0
-    // (ou compartilhar um eixo LT/RT), e adivinhar gera gatilho fantasma /
-    // double click. Pra esses, use o remap (🎮) que captura a fonte certa.
-    const lt = clamp01(b[6] ? b[6].v : 0);
-    const rt = clamp01(b[7] ? b[7].v : 0);
-    return { a, b, lt, rt };
-  }
-  // com perfil: monta b[] na ordem lógica a partir dos índices mapeados
+  if (!m) return passthroughPad(p); // sem perfil: melhor esforço (passa direto)
+  // com perfil (não-standard): monta b[] na ordem lógica a partir dos índices
   const b = PAD_BUTTONS.map((name) => {
     const idx = m.buttons?.[name];
     const btn = idx != null ? p.buttons[idx] : null;
@@ -643,6 +649,12 @@ function startRemap() {
   const p = curPad();
   if (!p) {
     setStatus("conecte um controle e mexa nele antes de remapear");
+    return;
+  }
+  // controle "standard" (Xbox e cia.) NÃO precisa de remap - passa direto.
+  // Remapear um standard só estraga. Bloqueia e avisa.
+  if (p.mapping === "standard") {
+    setStatus("controle padrão (Xbox) - já passa direto, sem remap necessário");
     return;
   }
   remapState.active = true;
@@ -744,6 +756,27 @@ async function finishRemap() {
   }
 }
 
+// Apaga o perfil de remap do controle atual (no servidor e em memória). Útil
+// se um perfil ruim foi salvo num controle que na verdade é standard.
+async function clearRemap() {
+  const p = curPad();
+  if (!p) {
+    setStatus("conecte um controle pra resetar o mapeamento");
+    return;
+  }
+  delete padMaps[p.id];
+  try {
+    await fetch("/api/gamepad-map", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: p.id }),
+    });
+    setStatus("mapeamento do controle resetado (passa direto)");
+  } catch (e) {
+    setStatus("resetado localmente (falhou no servidor)");
+  }
+}
+
 function skipRemapStep() {
   if (!remapState.active) return;
   remapState.step++;
@@ -766,6 +799,7 @@ $("kbd").addEventListener("click", () => toggleOSK());
 $("menuToggle").addEventListener("click", () => showBar(barHidden()));
 $("sound").addEventListener("click", () => setAudio(!audioOn));
 $("remapBtn").addEventListener("click", () => startRemap());
+$("remapClear").addEventListener("click", () => clearRemap());
 $("remapSkip").addEventListener("click", () => skipRemapStep());
 $("remapCancel").addEventListener("click", () => cancelRemap());
 
@@ -1031,6 +1065,7 @@ if (typeof module !== "undefined" && module.exports) {
     setKbdCapture, showBar, barHidden,
     loadGamepadMaps, mapPad, readSource, startRemap, cancelRemap,
     skipRemapStep, detectChange, applyDetection, finishRemap, remapTick,
+    clearRemap, passthroughPad,
     renderRemap,
     __get: (k) => eval(k),
   };

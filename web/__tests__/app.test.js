@@ -1479,6 +1479,88 @@ describe("gamepad remap / mapPad", () => {
     expect(app.mapPad(idle).rt).toBe(0);
   });
 
+  it("controle STANDARD (Xbox) passa DIRETO e ignora qualquer perfil salvo", async () => {
+    // mesmo havendo um perfil salvo pra esse id, mapping=standard usa passthrough
+    globalThis.fetch = vi.fn(async () => ({
+      json: async () => ({ "Xbox Wireless Controller": { buttons: { a: 9 } } }),
+    }));
+    await app.loadGamepadMaps();
+    const btns = Array.from({ length: 17 }, (_, i) => ({ pressed: i === 0, value: i === 0 ? 1 : 0 }));
+    btns[6] = { pressed: true, value: 0.5 };  // LT analógico
+    const p = {
+      id: "Xbox Wireless Controller", mapping: "standard",
+      axes: [0.1, 0.2, 0.3, 0.4], buttons: btns,
+    };
+    const r = app.mapPad(p);
+    expect(r.b[0]).toEqual({ p: true, v: 1 });   // A direto (não reembaralhado p/ idx 9)
+    expect(r.a).toEqual([0.1, 0.2, 0.3, 0.4]);
+    expect(r.lt).toBe(0.5);
+    expect(r.rt).toBe(0);
+  });
+
+  it("passthroughPad replica eixos e botões 1:1", () => {
+    const p = {
+      mapping: "standard", axes: [0.5, -0.5, 0, 1],
+      buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 7, value: i === 7 ? 0.9 : 0 })),
+    };
+    const r = app.passthroughPad(p);
+    expect(r.a).toEqual([0.5, -0.5, 0, 1]);
+    expect(r.rt).toBe(0.9); // buttons[7]
+  });
+
+  it("não-standard SEM perfil cai no passthrough (melhor esforço)", () => {
+    const p = mkPad({ buttons: Array.from({ length: 4 }, (_, i) => ({ pressed: i === 1, value: i === 1 ? 1 : 0 })) });
+    const r = app.mapPad(p); // padMaps vazio pra esse id
+    expect(r.b[1]).toEqual({ p: true, v: 1 });
+  });
+
+  it("startRemap em controle standard é bloqueado (não precisa)", () => {
+    navigator.getGamepads = () => [{
+      id: "Xbox", mapping: "standard", axes: [0, 0, 0, 0],
+      buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
+    }];
+    app.startRemap();
+    expect(app.__get("remapState").active).toBe(false);
+    expect(document.getElementById("status").textContent).toMatch(/padrão|direto/i);
+  });
+
+  it("clearRemap apaga o perfil (servidor + memória)", async () => {
+    const calls = [];
+    globalThis.fetch = vi.fn(async (url, opts) => {
+      calls.push(opts?.method);
+      return { json: async () => ({ ok: true, removed: true }) };
+    });
+    // injeta um perfil em memória
+    globalThis.fetch = vi.fn(async () => ({ json: async () => ({ "Twin USB Joystick": { buttons: {} } }) }));
+    await app.loadGamepadMaps();
+    expect(app.__get("padMaps")["Twin USB Joystick"]).toBeDefined();
+    const del = [];
+    globalThis.fetch = vi.fn(async (url, opts) => { del.push(opts?.method); return { json: async () => ({ ok: true }) }; });
+    navigator.getGamepads = () => [mkPad()];
+    await app.clearRemap();
+    expect(app.__get("padMaps")["Twin USB Joystick"]).toBeUndefined();
+    expect(del).toContain("DELETE");
+  });
+
+  it("clearRemap sem pad avisa e não chama o servidor", async () => {
+    navigator.getGamepads = () => [];
+    let called = false;
+    globalThis.fetch = vi.fn(async () => { called = true; return { json: async () => ({}) }; });
+    await app.clearRemap();
+    expect(called).toBe(false);
+  });
+
+  it("clearRemap com erro de rede não lança", async () => {
+    globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
+    navigator.getGamepads = () => [mkPad()];
+    await expect(app.clearRemap()).resolves.not.toThrow();
+  });
+
+  it("botão #remapClear chama clearRemap", () => {
+    navigator.getGamepads = () => [];
+    expect(() => document.getElementById("remapClear").click()).not.toThrow();
+  });
+
   it("startRemap sem pad: avisa e não abre", () => {
     navigator.getGamepads = () => [];
     app.startRemap();

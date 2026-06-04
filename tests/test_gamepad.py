@@ -61,3 +61,19 @@ def test_save_map_invalido(monkeypatch, tmp_path):
         gamepad.save_map("", {"a": 1})        # pad_id vazio
     with pytest.raises(ValueError):
         gamepad.save_map("ok", "naoeh dict")  # mapping nao-dict
+
+
+def test_delete_map(monkeypatch, tmp_path):
+    monkeypatch.setenv("RL_GAMEPAD_MAP", str(tmp_path / "gp.json"))
+    gamepad.save_map("Pad A", {"buttons": {"a": 1}})
+    gamepad.save_map("Pad B", {"buttons": {"b": 2}})
+    assert gamepad.delete_map("Pad A") is True   # existia
+    assert gamepad.delete_map("Pad A") is False  # ja foi
+    maps = gamepad.load_maps()
+    assert "Pad A" not in maps and "Pad B" in maps
+
+
+def test_delete_map_invalido(monkeypatch, tmp_path):
+    monkeypatch.setenv("RL_GAMEPAD_MAP", str(tmp_path / "gp.json"))
+    with pytest.raises(ValueError):
+        gamepad.delete_map("")

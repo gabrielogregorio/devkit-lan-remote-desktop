@@ -533,6 +533,28 @@ async def test_api_gamepad_map_post_valueerror(client, monkeypatch):
     assert "error" in (await resp.json())
 
 
+async def test_api_gamepad_map_delete_ok(client, monkeypatch):
+    monkeypatch.setattr(M.gamepad, "delete_map", lambda pid: True)
+    resp = await client.delete("/api/gamepad-map", json={"id": "Pad"})
+    assert resp.status == 200
+    body = await resp.json()
+    assert body["ok"] is True and body["removed"] is True
+
+
+async def test_api_gamepad_map_delete_json_invalido(client):
+    resp = await client.delete("/api/gamepad-map", data="naoeh json",
+                               headers={"Content-Type": "application/json"})
+    assert resp.status == 400
+
+
+async def test_api_gamepad_map_delete_valueerror(client, monkeypatch):
+    def boom(pid):
+        raise ValueError("pad_id obrigatorio")
+    monkeypatch.setattr(M.gamepad, "delete_map", boom)
+    resp = await client.delete("/api/gamepad-map", json={"id": ""})
+    assert resp.status == 400
+
+
 async def test_ws_video(client):
     # Envia mensagem regular (não-CLOSE/ERROR) para cobrir branch 247->246
     ws = await client.ws_connect("/ws/video")

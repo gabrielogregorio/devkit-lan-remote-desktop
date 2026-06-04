@@ -1,0 +1,95 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>remote-link · diagnóstico de gamepad</title>
+  <style>
+    body { background:#0b0d10; color:#e7edf3; font:14px ui-monospace,monospace;
+           margin:0; padding:16px; }
+    h1 { font-size:18px; margin:0 0 4px; }
+    p { color:#7d8794; margin:0 0 16px; }
+    .pad { border:1px solid #232a33; border-radius:10px; padding:12px;
+           margin-bottom:16px; }
+    .id { color:#3da9fc; word-break:break-all; }
+    .map { color:#2ecc71; }
+    table { border-collapse:collapse; width:100%; margin-top:8px; }
+    td { padding:2px 8px; border-bottom:1px solid #1a1f26; font-variant-numeric:tabular-nums; }
+    .lbl { color:#7d8794; width:90px; }
+    .bar { display:inline-block; height:10px; background:#3da9fc; border-radius:3px;
+           vertical-align:middle; }
+    .on { color:#2ecc71; font-weight:700; }
+    .off { color:#3a424d; }
+    .cols { display:flex; gap:24px; flex-wrap:wrap; }
+    .col { flex:1; min-width:280px; }
+    .hint { background:#15191f; padding:10px; border-radius:8px; margin-top:8px; }
+  </style>
+</head>
+<body>
+  <h1>Diagnóstico de gamepad</h1>
+  <p>Mexa em TUDO no controle (sticks, gatilhos até o fundo, D-Pad, botões).
+     Os valores que mudam são os índices reais que o navegador reporta.
+     <b>Tire um print disto</b> com os gatilhos LT e RT apertados pela metade.</p>
+  <div id="out">Conecte um controle e aperte qualquer botão…</div>
+
+<script>
+const out = document.getElementById("out");
+
+function pct(v) { return Math.round(v * 100); }
+function bar(v) {
+  const w = Math.max(0, Math.min(100, ((v + 1) / 2) * 100)); // -1..1 -> 0..100 p/ eixos
+  return `<span class="bar" style="width:${w}px"></span>`;
+}
+function barUnit(v) {
+  const w = Math.max(0, Math.min(100, v * 100)); // 0..1
+  return `<span class="bar" style="width:${w}px"></span>`;
+}
+
+function render() {
+  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  let html = "";
+  let any = false;
+  for (const p of pads) {
+    if (!p) continue;
+    any = true;
+    html += `<div class="pad">`;
+    html += `<div class="id">id: ${p.id}</div>`;
+    html += `<div>mapping: <span class="map">${p.mapping || "(vazio / NÃO-standard)"}</span>`;
+    html += ` · botões: ${p.buttons.length} · eixos: ${p.axes.length}</div>`;
+    html += `<div class="cols">`;
+
+    // botões
+    html += `<div class="col"><table>`;
+    p.buttons.forEach((b, i) => {
+      const cls = b.pressed ? "on" : "off";
+      html += `<tr><td class="lbl">btn[${i}]</td>`
+        + `<td class="${cls}">${b.pressed ? "▮" : "▯"}</td>`
+        + `<td>${b.value.toFixed(3)}</td>`
+        + `<td>${barUnit(b.value)}</td></tr>`;
+    });
+    html += `</table></div>`;
+
+    // eixos
+    html += `<div class="col"><table>`;
+    p.axes.forEach((v, i) => {
+      html += `<tr><td class="lbl">axis[${i}]</td>`
+        + `<td>${(v ?? 0).toFixed(3)}</td>`
+        + `<td>${bar(v ?? 0)}</td></tr>`;
+    });
+    html += `</table></div>`;
+
+    html += `</div></div>`;
+  }
+  if (any) {
+    html += `<div class="hint">Para um Xbox real esperado: mapping = "standard",
+      btn[6]/btn[7] = gatilhos LT/RT (value de 0 a 1), btn[12..15] = D-Pad,
+      axis[0..3] = sticks. Se o seu mostra mapping vazio e os gatilhos como
+      axis, é um controle não-standard (precisa do remap).</div>`;
+    out.innerHTML = html;
+  }
+  requestAnimationFrame(render);
+}
+requestAnimationFrame(render);
+</script>
+</body>
+</html>

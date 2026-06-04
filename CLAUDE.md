@@ -87,10 +87,21 @@ hatch anti-ban - ver `ANTIBAN.md`).
   (res/fps/bitrate atuais), faixas (`res_options`/`fps_options`/`bitrate_options`),
   presets de áudio e `audio_manual`.
 - `GET /api/gamepad-map` - todos os perfis de remapeamento salvos (por
-  `gamepad.id`). `POST` com `{"id","map"}` salva um perfil. Persistido por
-  `server/gamepad.py` em `~/.config/remote-link/gamepad-map.json` (ou
-  `RL_GAMEPAD_MAP`). O cliente traduz o pad bruto → formato Xbox padrão antes de
-  enviar `t:"g"`; o servidor só guarda/serve o JSON (blob opaco).
+  `gamepad.id`). `POST` com `{"id","map"}` salva; `DELETE` com `{"id"}` apaga.
+  Persistido por `server/gamepad.py` em
+  `~/.config/remote-link/gamepad-map.json` (ou `RL_GAMEPAD_MAP`). O servidor só
+  guarda/serve o JSON (blob opaco).
+- `GET /gamepad-debug.html` - página de diagnóstico: mostra `mapping`, todos os
+  `buttons[i].value` e `axes[i]` ao vivo. Use pra descobrir como um controle
+  aparece antes de mexer em mapeamento.
+
+Gamepad - **passagem direta por padrão**: se `gamepad.mapping === "standard"`
+(Xbox e a maioria), o cliente repassa byte a byte na ordem W3C (que já é a ordem
+que o servidor quer) e **ignora qualquer perfil** - um Xbox nunca precisa de
+remap. O remap (`🎮`) só vale e só roda em controle **não-standard** (clones
+PS2/USB); `🎮↺` apaga o perfil e volta à passagem direta. Gatilhos LT/RT são
+replicados fiéis (`clamp01` no cliente, `round(v*255)` no servidor) - sem
+deadzone/rescale.
 
 ## Protocolo dos WebSockets
 

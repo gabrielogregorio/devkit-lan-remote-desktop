@@ -334,6 +334,19 @@ async def api_gamepad_map_post(request):
     return web.json_response({"ok": True})
 
 
+async def api_gamepad_map_delete(request):
+    """Apaga o perfil de um controle. Body: {"id": "<gamepad.id>"}."""
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "json invalido"}, status=400)
+    try:
+        removed = gamepad.delete_map(body.get("id"))
+    except ValueError as ex:
+        return web.json_response({"error": str(ex)}, status=400)
+    return web.json_response({"ok": True, "removed": removed})
+
+
 async def ws_input(request):
     hub: Hub = request.app["hub"]
     ahub: AudioHub = request.app["audio_hub"]
@@ -391,6 +404,7 @@ def build_app() -> web.Application:
     app.router.add_get("/api/monitors", api_monitors)
     app.router.add_get("/api/gamepad-map", api_gamepad_map_get)
     app.router.add_post("/api/gamepad-map", api_gamepad_map_post)
+    app.router.add_delete("/api/gamepad-map", api_gamepad_map_delete)
     app.router.add_get("/ws/video", ws_video)
     app.router.add_get("/ws/audio", ws_audio)
     app.router.add_get("/ws/input", ws_input)

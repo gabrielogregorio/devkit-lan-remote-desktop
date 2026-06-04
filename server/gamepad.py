@@ -44,6 +44,22 @@ def save_map(pad_id: str, mapping: dict) -> None:
         raise ValueError("pad_id e mapping (dict) obrigatorios")
     maps = load_maps()
     maps[str(pad_id)] = mapping
+    _write(maps)
+
+
+def delete_map(pad_id: str) -> bool:
+    """Remove o perfil de um controle. Retorna True se existia."""
+    if not pad_id:
+        raise ValueError("pad_id obrigatorio")
+    maps = load_maps()
+    if str(pad_id) not in maps:
+        return False
+    del maps[str(pad_id)]
+    _write(maps)
+    return True
+
+
+def _write(maps: dict) -> None:
     path = _map_path()
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

@@ -5,7 +5,8 @@ const IDS = [
   "kbd", "menuToggle", "sound", "preset", "monitor",
   "vres", "vfps", "vbitrate", "audioPreset",
   "bar", "osk",
-  "remapBtn", "remap", "remapTitle", "remapPrompt", "remapSkip", "remapCancel",
+  "remapBtn", "remapClear", "remap", "remapTitle", "remapPrompt",
+  "remapSkip", "remapCancel",
 ];
 const SELECTS = ["preset", "monitor", "vres", "vfps", "vbitrate", "audioPreset"];
 
