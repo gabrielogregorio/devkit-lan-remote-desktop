@@ -525,6 +525,18 @@ async function loadGamepadMaps() {
   }
 }
 
+// Gatilho preciso: deadzone embaixo (mata o jitter em repouso que vira
+// "double click") e satura no topo. Quantiza em degraus de 1/255 (resolução
+// real do ABS_Z do Xbox) pra não reenviar por ruído infinitesimal.
+const TRIG_DZ = 0.06; // abaixo disso = solto (0)
+const TRIG_TOP = 0.95; // acima disso = fundo (1)
+function shapeTrigger(v) {
+  if (!(v > TRIG_DZ)) return 0; // inclui NaN/negativo/repouso
+  if (v >= TRIG_TOP) return 1;
+  const n = (v - TRIG_DZ) / (TRIG_TOP - TRIG_DZ);
+  return Math.round(n * 255) / 255; // degrau de 1/255 (estável)
+}
+
 // lê um source de gatilho/eixo do perfil: {src:"axis",i,min,max} ou {src:"button",i}
 function readSource(p, s) {
   if (!s) return 0;
@@ -532,11 +544,14 @@ function readSource(p, s) {
     const btn = p.buttons[s.i];
     return btn ? btn.value : 0;
   }
-  // eixo: normaliza de [min..max] (default -1..1) pra 0..1
+  // eixo: normaliza de [min(repouso)..max(pressionado)] pra 0..1. Suporta eixo
+  // invertido (max < min) porque o controle PS2/USB pode ir de 0 a -1.
   const v = p.axes[s.i];
   if (v === undefined || v === null || Number.isNaN(v)) return 0;
   const min = s.min ?? -1, max = s.max ?? 1;
-  return Math.min(1, Math.max(0, (v - min) / (max - min || 1)));
+  const span = max - min;
+  if (Math.abs(span) < 1e-6) return 0; // calibração degenerada -> trata solto
+  return Math.min(1, Math.max(0, (v - min) / span));
 }
 
 // Traduz o pad bruto -> formato padrão usando o perfil salvo (se houver).
@@ -546,13 +561,13 @@ function mapPad(p) {
     // sem perfil: heurística padrão (standard + eixos extras p/ gatilhos)
     const a = PAD_AXES.map((_, i) => p.axes[i] || 0);
     const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
-    let lt = b[6] ? b[6].v : 0;
-    let rt = b[7] ? b[7].v : 0;
-    if (p.mapping !== "standard" && p.axes.length >= 6) {
-      lt = Math.max(lt, (p.axes[4] + 1) / 2 || 0);
-      rt = Math.max(rt, (p.axes[5] + 1) / 2 || 0);
-    }
-    return { a, b, lt: +lt.toFixed(3), rt: +rt.toFixed(3) };
+    // gatilhos só dos buttons[6]/[7] (mapping standard). NÃO inventamos a
+    // partir de eixos sem perfil: controle PS2/USB costuma repousar o eixo em 0
+    // (ou compartilhar um eixo LT/RT), e adivinhar gera gatilho fantasma /
+    // double click. Pra esses, use o remap (🎮) que captura a fonte certa.
+    const lt = shapeTrigger(b[6] ? b[6].v : 0);
+    const rt = shapeTrigger(b[7] ? b[7].v : 0);
+    return { a, b, lt, rt };
   }
   // com perfil: monta b[] na ordem lógica a partir dos índices mapeados
   const b = PAD_BUTTONS.map((name) => {
@@ -564,8 +579,8 @@ function mapPad(p) {
     const idx = m.axes?.[name];
     return idx != null ? (p.axes[idx] || 0) : 0;
   });
-  const lt = +readSource(p, m.triggers?.lt).toFixed(3);
-  const rt = +readSource(p, m.triggers?.rt).toFixed(3);
+  const lt = shapeTrigger(readSource(p, m.triggers?.lt));
+  const rt = shapeTrigger(readSource(p, m.triggers?.rt));
   return { a, b, lt, rt };
 }
 
@@ -663,10 +678,14 @@ function detectChange(p) {
     if (d > bestDelta) { bestDelta = d; best = { src: "button", i }; }
   });
   p.axes.forEach((v, i) => {
-    const d = Math.abs((v || 0) - (base.axes[i] ?? 0));
+    const rest = base.axes[i] ?? 0;
+    const d = Math.abs((v || 0) - rest);
     if (d > bestDelta) {
       bestDelta = d;
-      best = { src: "axis", i, dir: v >= (base.axes[i] ?? 0) ? 1 : -1 };
+      // guarda repouso (rest) e valor pressionado (cur) p/ calibrar o gatilho:
+      // controle PS2/USB pode repousar o eixo em 0 (não em -1), e assumir -1
+      // deixa o gatilho 50% apertado parado -> double click.
+      best = { src: "axis", i, rest, cur: v || 0 };
     }
   });
   return best;
@@ -680,8 +699,9 @@ function applyDetection(step, found) {
   } else if (step.kind === "axis") {
     if (found.src === "axis") d.axes[step.name] = found.i;
   } else if (step.kind === "trigger") {
+    // calibra min=repouso, max=pressionado (medidos no remap), não chuta -1..1.
     d.triggers[step.name] = found.src === "axis"
-      ? { src: "axis", i: found.i, min: -1, max: 1 }
+      ? { src: "axis", i: found.i, min: found.rest, max: found.cur }
       : { src: "button", i: found.i };
   }
 }

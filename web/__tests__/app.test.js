@@ -1314,7 +1314,7 @@ describe("Gamepad / pollPads", () => {
     expect(msg.a).toEqual([0, 0, 0, 0]);
   });
 
-  it("mapping standard: gatilhos vêm de buttons[6]/[7]", () => {
+  it("mapping standard: gatilhos vêm de buttons[6]/[7] (com shaping)", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
     btns[6] = { pressed: true, value: 0.7 };
@@ -1322,22 +1322,45 @@ describe("Gamepad / pollPads", () => {
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg.lt).toBeCloseTo(0.7, 2);
-    expect(msg.rt).toBeCloseTo(0.4, 2);
+    // shapeTrigger: deadzone 0.06, topo 0.95 -> reescala. 0.7 e 0.4 ficam
+    // proporcionais (não exatos), mas claramente acionados e monotônicos.
+    expect(msg.lt).toBeGreaterThan(msg.rt);
+    expect(msg.lt).toBeGreaterThan(0.6);
+    expect(msg.rt).toBeGreaterThan(0.3);
+    expect(msg.rt).toBeLessThan(0.5);
   });
 
-  it("controle PS2 USB (mapping não-standard): gatilhos vêm dos eixos extras", () => {
+  it("gatilho em repouso (ruído) é zerado pela deadzone (sem double click)", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    // adaptador PSX→USB: mapping "", gatilhos como axes[4]/[5] (-1 solto .. +1 fundo)
+    const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
+    btns[6] = { pressed: false, value: 0.03 }; // jitter abaixo da deadzone
+    navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBe(0);
+  });
+
+  it("gatilho quase no fundo satura em 1", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    const btns = Array.from({ length: 8 }, () => ({ pressed: true, value: 0.97 }));
+    navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
+    app.pollPads();
+    const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
+    expect(msg.lt).toBe(1);
+  });
+
+  it("sem perfil NÃO inventa gatilho a partir de eixos extras", () => {
+    const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
+    // controle que repousa o eixo do gatilho em 0 -> não pode virar 0.5 fantasma
     navigator.getGamepads = () => [{
       mapping: "",
-      axes: [0, 0, 0, 0, 1.0, -1.0], // LT fundo, RT solto
+      axes: [0, 0, 0, 0, 0, 0],
       buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })),
     }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg.lt).toBeCloseTo(1.0, 2); // (1+1)/2
-    expect(msg.rt).toBeCloseTo(0.0, 2); // (-1+1)/2
+    expect(msg.lt).toBe(0);
+    expect(msg.rt).toBe(0);
   });
 
   it("PS2 USB com eixo de gatilho inválido cai pra 0", () => {
@@ -1396,22 +1419,26 @@ describe("gamepad remap / mapPad", () => {
     expect(app.readSource(p, { src: "axis", i: 99 })).toBe(0);   // NaN/undefined
   });
 
-  it("mapPad sem perfil: heurística padrão (eixos extras viram gatilhos)", () => {
-    const p = mkPad({ axes: [0.1, 0.2, 0.3, 0.4, 1.0, -1.0] });
+  it("mapPad sem perfil: gatilhos só de buttons[6]/[7] (não inventa de eixos)", () => {
+    const p = mkPad({
+      axes: [0.1, 0.2, 0.3, 0.4, 1.0, -1.0],
+      buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 6, value: i === 6 ? 1 : 0 })),
+    });
     const r = app.mapPad(p);
     expect(r.a).toEqual([0.1, 0.2, 0.3, 0.4]);
-    expect(r.lt).toBeCloseTo(1.0, 2);
-    expect(r.rt).toBeCloseTo(0.0, 2);
+    expect(r.lt).toBe(1);   // button[6] no fundo
+    expect(r.rt).toBe(0);   // sem perfil, eixo extra NÃO vira gatilho
   });
 
-  it("mapPad com perfil: reordena botões/eixos e lê gatilhos", async () => {
-    // injeta um perfil pro id do pad
+  it("mapPad com perfil: reordena botões/eixos e calibra gatilhos", async () => {
+    // injeta um perfil pro id do pad. Gatilho rt como eixo que repousa em 0 e
+    // vai a 1 (min=0,max=1): em repouso deve dar 0, não 0.5.
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         "Twin USB Joystick": {
           buttons: { a: 2, b: 1 },           // A está no índice bruto 2
           axes: { lx: 3, ly: 0 },
-          triggers: { lt: { src: "button", i: 6 }, rt: { src: "axis", i: 5, min: -1, max: 1 } },
+          triggers: { lt: { src: "button", i: 6 }, rt: { src: "axis", i: 5, min: 0, max: 1 } },
         },
       }),
     }));
@@ -1423,8 +1450,15 @@ describe("gamepad remap / mapPad", () => {
     const r = app.mapPad(p);
     expect(r.b[0]).toEqual({ p: true, v: 1 });   // 'a' lógico <- bruto 2
     expect(r.a[0]).toBeCloseTo(0.9, 2);          // lx <- eixo 3
-    expect(r.lt).toBeCloseTo(0.5, 2);            // botão bruto 6
-    expect(r.rt).toBeCloseTo(1.0, 2);            // eixo 5 (1.0 -> 1.0)
+    expect(r.lt).toBeCloseTo(0.47, 1);           // button bruto 6 (0.5 shaped)
+    expect(r.rt).toBe(1);                        // eixo 5 (0->1) no fundo
+
+    // mesmo controle em REPOUSO (eixo 5 = 0) -> gatilho rt deve ser 0
+    const idle = mkPad({
+      axes: [0, 0, 0, 0, 0, 0],
+      buttons: Array.from({ length: 8 }, () => ({ pressed: false, value: 0 })),
+    });
+    expect(app.mapPad(idle).rt).toBe(0);
   });
 
   it("startRemap sem pad: avisa e não abre", () => {
@@ -1464,11 +1498,26 @@ describe("gamepad remap / mapPad", () => {
     app.cancelRemap();
   });
 
-  it("detectChange com eixo negativo registra dir -1", () => {
+  it("detectChange com eixo negativo guarda repouso e valor pressionado", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, -0.9] }));
-    expect(found).toEqual({ src: "axis", i: 4, dir: -1 });
+    expect(found.src).toBe("axis");
+    expect(found.i).toBe(4);
+    expect(found.rest).toBe(0);    // repouso
+    expect(found.cur).toBe(-0.9);  // valor ao acionar (eixo invertido)
+    app.cancelRemap();
+  });
+
+  it("detectChange: eixo que repousava alto e foi a 0 (cur falsy -> || 0)", () => {
+    const resting = mkPad({ axes: [0, 0, 0, 0, 0.9] });
+    navigator.getGamepads = () => [resting];
+    app.startRemap(); // base.axes[4] = 0.9 (repouso alto)
+    // agora o eixo 4 vai pra 0 explícito (v=0 -> `v || 0`)
+    const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, 0] }));
+    expect(found.src).toBe("axis");
+    expect(found.i).toBe(4);
+    expect(found.cur).toBe(0);
     app.cancelRemap();
   });
 
@@ -1501,12 +1550,13 @@ describe("gamepad remap / mapPad", () => {
     app.startRemap();
     app.applyDetection({ kind: "button", name: "a" }, { src: "button", i: 5 });
     app.applyDetection({ kind: "axis", name: "lx" }, { src: "axis", i: 3 });
-    app.applyDetection({ kind: "trigger", name: "lt" }, { src: "axis", i: 4 });
+    // gatilho como eixo: grava min=repouso e max=pressionado medidos
+    app.applyDetection({ kind: "trigger", name: "lt" }, { src: "axis", i: 4, rest: 0, cur: 1 });
     app.applyDetection({ kind: "trigger", name: "rt" }, { src: "button", i: 7 });
     const d = app.__get("remapState").draft;
     expect(d.buttons.a).toBe(5);
     expect(d.axes.lx).toBe(3);
-    expect(d.triggers.lt).toEqual({ src: "axis", i: 4, min: -1, max: 1 });
+    expect(d.triggers.lt).toEqual({ src: "axis", i: 4, min: 0, max: 1 });
     expect(d.triggers.rt).toEqual({ src: "button", i: 7 });
     app.cancelRemap();
   });
