@@ -1,4 +1,23 @@
+<div align="center">
+
 # remote-link
+
+**A tela do PC em qualquer aparelho da rede pelo navegador, com mouse, teclado e controle Xbox, latência mínima.**
+
+![Python](https://img.shields.io/badge/Python-3.12-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54)
+![aiohttp](https://img.shields.io/badge/aiohttp-2C5BB4?style=for-the-badge&logo=aiohttp&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
+![WebCodecs](https://img.shields.io/badge/WebCodecs-H.264-FF6F00?style=for-the-badge&logo=googlechrome&logoColor=white)
+![FFmpeg](https://img.shields.io/badge/FFmpeg-007808?style=for-the-badge&logo=ffmpeg&logoColor=white)
+![uinput](https://img.shields.io/badge/Linux-uinput-FCC624?style=for-the-badge&logo=linux&logoColor=black)
+![pytest](https://img.shields.io/badge/pytest-0A9EDC?style=for-the-badge&logo=pytest&logoColor=white)
+![Vitest](https://img.shields.io/badge/Vitest-6E9F18?style=for-the-badge&logo=vitest&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)
+![Cobertura](https://img.shields.io/badge/cobertura%20do%20servidor-100%25-2E7D32?style=for-the-badge)
+
+</div>
+
+## Sobre o projeto
 
 Compartilhe a tela do seu **Ubuntu** para **qualquer device da rede local**
 (tablet, celular Android, outro notebook/Ubuntu) **pelo navegador**, com
@@ -14,6 +33,43 @@ Abra o endereço que aparecer (ex.: `https://192.168.0.101:8443`) no navegador
 do outro aparelho. Pronto.
 
 ---
+
+## Configurar num PC novo
+
+1. Sessão **X11** (Xorg). No Ubuntu 24.04: tela de login → engrenagem no canto → "Ubuntu em Xorg". Em Wayland a janela não fica por cima e o mouse não é capturado.
+2. Pacotes:
+   ```bash
+   sudo apt install ffmpeg openssl python3 python3-venv acl
+   ```
+   Encoder por hardware (opcional, cai no x264 se não tiver): NVIDIA = driver proprietário
+   (`nvidia-driver-*`, traz o NVENC); Intel/AMD = `intel-media-va-driver` ou `mesa-va-drivers`.
+3. Clonar, liberar o controle e subir:
+   ```bash
+   git clone <url-do-repo> devkit-remote_link
+   cd devkit-remote_link
+   ./remote-link.sh setup   # /dev/uinput: regra udev + grupo input (sudo). Depois: logout/login
+   ./remote-link.sh         # cria o .venv e o certificado na 1ª vez e mostra o endereço
+   ```
+4. No outro aparelho: Chrome/Edge no endereço mostrado, aceitar o certificado.
+5. Testes (opcional): `npm install` (precisa de `nodejs`/`npm`) e ver **Desenvolvimento**.
+
+**Fora do repositório:** `.venv/` e `certs/` (gerados, ignorados pelo git),
+`~/.config/remote-link/gamepad-map.json` (perfis de controle) e
+`/etc/udev/rules.d/99-remote-link-uinput.rules`.
+
+## Scripts disponíveis
+
+```bash
+# Rodar
+./remote-link.sh               # porta 8443
+./remote-link.sh --port 9000
+./remote-link.sh setup         # libera /dev/uinput (uma vez)
+
+# Testar
+./.venv/bin/python -m pytest --cov=server   # servidor (gate: 100%)
+npm install && npm run test:web             # cliente (vitest + jsdom)
+npm run test:e2e                            # ponta a ponta (server real + Chromium)
+```
 
 ## Como funciona (a escolha técnica)
 
@@ -178,12 +234,6 @@ por sua conta e risco): **[ANTIBAN.md](ANTIBAN.md)**.
 ---
 
 ## Desenvolvimento
-
-```bash
-./.venv/bin/python -m pytest --cov=server   # servidor (gate de 100%)
-npm install && npm run test:web             # cliente (vitest + jsdom)
-npm run test:e2e                            # ponta a ponta (server real + Chromium)
-```
 
 A estratégia de teste - o que cada camada cobre e como escrever teste novo -
 está em **[TESTING.md](TESTING.md)**. Guia de arquitetura pra quem for mexer no
