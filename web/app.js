@@ -535,18 +535,27 @@ function clamp01(v) {
   return v > 1 ? 1 : v;
 }
 
+// Número utilizável ou o padrão. Um controle "pirata" (ou um driver estranho)
+// pode entregar undefined/NaN/Infinity num eixo ou botão; deixar isso passar
+// vira NaN no JSON -> null no servidor -> eixo/gatilho maluco.
+function padNum(v, fallback = 0) {
+  return typeof v === "number" && Number.isFinite(v) ? v : fallback;
+}
+
 // lê um source de gatilho/eixo do perfil: {src:"axis",i,min,max} ou {src:"button",i}
 function readSource(p, s) {
   if (!s) return 0;
   if (s.src === "button") {
-    const btn = p.buttons[s.i];
-    return btn ? btn.value : 0;
+    const btn = Array.isArray(p.buttons) ? p.buttons[s.i] : null;
+    return btn ? clamp01(padNum(btn.value)) : 0;
   }
   // eixo: normaliza de [min(repouso)..max(pressionado)] pra 0..1. Suporta eixo
   // invertido (max < min) porque o controle PS2/USB pode ir de 0 a -1.
-  const v = p.axes[s.i];
-  if (v === undefined || v === null || Number.isNaN(v)) return 0;
-  const min = s.min ?? -1, max = s.max ?? 1;
+  const v = Array.isArray(p.axes) ? p.axes[s.i] : undefined;
+  // só número finito vale: ausente/NaN/lixo -> solto (0). Cuidado: NÃO dá pra
+  // "converter pra 0 e normalizar", porque 0 num eixo -1..1 vira meio apertado.
+  if (typeof v !== "number" || !Number.isFinite(v)) return 0;
+  const min = padNum(s.min, -1), max = padNum(s.max, 1);
   const span = max - min;
   if (Math.abs(span) < 1e-6) return 0; // calibração degenerada -> trata solto
   return Math.min(1, Math.max(0, (v - min) / span));
@@ -558,10 +567,15 @@ function readSource(p, s) {
 // Então repassamos byte a byte, sem mexer. É o caminho de QUALQUER controle
 // que o browser reconheça (Xbox, DualShock, etc.).
 function passthroughPad(p) {
-  const a = [p.axes[0] || 0, p.axes[1] || 0, p.axes[2] || 0, p.axes[3] || 0];
-  const b = p.buttons.map((x) => ({ p: x.pressed, v: +x.value.toFixed(3) }));
-  const lt = clamp01(p.buttons[6] ? p.buttons[6].value : 0);
-  const rt = clamp01(p.buttons[7] ? p.buttons[7].value : 0);
+  const ax = Array.isArray(p.axes) ? p.axes : [];
+  const btns = Array.isArray(p.buttons) ? p.buttons : [];
+  const a = [padNum(ax[0]), padNum(ax[1]), padNum(ax[2]), padNum(ax[3])];
+  const b = btns.map((x) => ({
+    p: !!(x && x.pressed),
+    v: +clamp01(padNum(x && x.value)).toFixed(3),
+  }));
+  const lt = clamp01(padNum(btns[6] && btns[6].value));
+  const rt = clamp01(padNum(btns[7] && btns[7].value));
   return { a, b, lt, rt };
 }
 
@@ -576,12 +590,15 @@ function mapPad(p) {
   // com perfil (não-standard): monta b[] na ordem lógica a partir dos índices
   const b = PAD_BUTTONS.map((name) => {
     const idx = m.buttons?.[name];
-    const btn = idx != null ? p.buttons[idx] : null;
-    return { p: btn ? btn.pressed : false, v: btn ? +btn.value.toFixed(3) : 0 };
+    const btn = idx != null && Array.isArray(p.buttons) ? p.buttons[idx] : null;
+    return {
+      p: !!(btn && btn.pressed),
+      v: btn ? +clamp01(padNum(btn.value)).toFixed(3) : 0,
+    };
   });
   const a = PAD_AXES.map((name) => {
     const idx = m.axes?.[name];
-    return idx != null ? (p.axes[idx] || 0) : 0;
+    return idx != null && Array.isArray(p.axes) ? padNum(p.axes[idx]) : 0;
   });
   const lt = clamp01(readSource(p, m.triggers?.lt));
   const rt = clamp01(readSource(p, m.triggers?.rt));
@@ -590,24 +607,37 @@ function mapPad(p) {
 
 let padSnap = "";
 function pollPads() {
-  const pads = navigator.getGamepads ? navigator.getGamepads() : [];
-  let p = null;
-  for (const g of pads)
-    if (g) {
-      p = g;
-      break;
+  // try/catch em TUDO (inclusive o getGamepads): se algo escapar daqui, o
+  // requestAnimationFrame do fim não roda e o polling MORRE pro resto da
+  // sessão - o controle simplesmente para de funcionar sem nenhum aviso.
+  try {
+    const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    let p = null;
+    for (const g of pads)
+      if (g) {
+        p = g;
+        break;
+      }
+    if (p && !remapState.active) {
+      const { a, b, lt, rt } = mapPad(p);
+      // Dedup na RESOLUÇÃO DO DESTINO: o servidor escreve eixo como int16 e
+      // botão/gatilho como byte 0..255, e o evdev descarta valor repetido.
+      // Então comparar o valor cru (float) reenviaria a cada micro-ruído do
+      // controle - tráfego e CPU à toa, 60x/s. O que VAI no fio continua sendo
+      // o valor fiel; só a comparação é quantizada.
+      const ltByte = Math.round(lt * 255), rtByte = Math.round(rt * 255);
+      const snap = JSON.stringify([
+        a.map((v) => Math.round(v * 32767)),
+        b.map((x) => [x.p, Math.round(x.v * 255)]),
+        ltByte, rtByte,
+      ]);
+      if (snap !== padSnap) {
+        padSnap = snap;
+        sendInput({ t: "g", a, b, lt, rt });
+      }
     }
-  if (p && !remapState.active) {
-    const { a, b, lt, rt } = mapPad(p);
-    // dedup dos gatilhos pelo BYTE final (0..255) que o servidor vai escrever:
-    // evita reenviar por ruído < 1/255 (que o destino nem distingue) sem
-    // distorcer o valor cru enviado.
-    const ltByte = Math.round(lt * 255), rtByte = Math.round(rt * 255);
-    const snap = JSON.stringify([a, b, ltByte, rtByte]);
-    if (snap !== padSnap) {
-      padSnap = snap;
-      sendInput({ t: "g", a, b, lt, rt });
-    }
+  } catch (e) {
+    console.warn("gamepad", e);
   }
   requestAnimationFrame(pollPads);
 }
@@ -797,6 +827,10 @@ $("full").addEventListener("click", () => {
 });
 $("kbd").addEventListener("click", () => toggleOSK());
 $("menuToggle").addEventListener("click", () => showBar(barHidden()));
+// barra escondida pela engrenagem: o canto onde ela ficava vira um "botão"
+// invisível (#menuRecall, só visível via CSS com a barra oculta). Fora dele o
+// clique segue normal pro PC remoto.
+$("menuRecall").addEventListener("click", () => showBar(true));
 $("sound").addEventListener("click", () => setAudio(!audioOn));
 $("remapBtn").addEventListener("click", () => startRemap());
 $("remapClear").addEventListener("click", () => clearRemap());
@@ -812,16 +846,10 @@ function barHidden() {
 function showBar(on) {
   $("bar").classList.toggle("hidden", !on);
 }
-let barAutoHide = null;
+// Só ABRE: uma vez aberta, a barra fica até clicar na engrenagem (⚙) de novo -
+// não há auto-hide (sumir sozinha atrapalhava mexer nos seletores).
 window.addEventListener("mousemove", (e) => {
-  if (e.clientY <= Math.max(40, window.innerHeight * 0.06)) {
-    showBar(true);
-    clearTimeout(barAutoHide);
-    // some sozinha depois de 2.5s se o mouse sair do topo
-    barAutoHide = setTimeout(() => {
-      if (document.pointerLockElement !== canvas) showBar(false);
-    }, 2500);
-  }
+  if (e.clientY <= Math.max(40, window.innerHeight * 0.06)) showBar(true);
 });
 // no mobile: swipe de cima pra baixo (ou toque na faixa superior) revela a barra
 window.addEventListener(
@@ -905,6 +933,18 @@ const stickyHeld = new Set();
 function buildOSK() {
   const k = $("osk");
   if (k.childElementCount) return; // já montado
+  // o OSK cobre a barra (e o botão ⌨), então precisa do próprio botão de fechar
+  const head = document.createElement("div");
+  head.className = "osk-head";
+  const close = document.createElement("button");
+  close.className = "osk-close";
+  close.textContent = "✕ fechar teclado";
+  close.addEventListener("click", (ev) => {
+    ev.preventDefault();
+    toggleOSK(false);
+  });
+  head.appendChild(close);
+  k.appendChild(head);
   for (const row of OSK_ROWS) {
     const r = document.createElement("div");
     r.className = "osk-row";

@@ -4,7 +4,7 @@ const IDS = [
   "screen", "overlay", "status", "stats", "connect", "lock", "full",
   "kbd", "menuToggle", "sound", "preset", "monitor",
   "vres", "vfps", "vbitrate", "audioPreset",
-  "bar", "osk",
+  "bar", "osk", "menuRecall",
   "remapBtn", "remapClear", "remap", "remapTitle", "remapPrompt",
   "remapSkip", "remapCancel",
 ];

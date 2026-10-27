@@ -86,7 +86,8 @@ def _kbps(bitrate: str) -> int:
         if s.endswith("k"):
             return int(float(s[:-1]))
         return int(float(s) / 1000)
-    except ValueError:
+    except (ValueError, OverflowError):
+        # inf/NaN/lixo -> bitrate padrao (o VBV so precisa de um numero sao)
         return 8000
 
 
@@ -95,6 +96,47 @@ def _lowlat_bufsize(bitrate: str) -> str:
     deixa o bitrate "estourar" num frame so e segura os picos que travam o
     decoder. Usamos ~1/3 do bitrate/s (acima de 1 frame, abaixo de 1s)."""
     return f"{max(500, _kbps(bitrate) // 3)}k"
+
+
+# Faixas aceitas no canal 'vq' (qualidade de video vinda do cliente). O cliente
+# e LAN aberta: um valor absurdo ou com tipo errado nao pode virar uma linha de
+# comando de ffmpeg impossivel (encoder morre em loop e a tela fica preta).
+# Aqui a regra e simples: clampa o que da pra clampar, ignora o que e lixo.
+RES_MIN, RES_MAX = 144, 2160
+FPS_MIN, FPS_MAX = 5, 240
+BITRATE_MIN_KBPS, BITRATE_MAX_KBPS = 100, 100_000
+_BITRATE_RE = re.compile(r"^\d+(?:\.\d+)?[kKmM]?$")
+
+
+def clamp_res(value, fallback: int) -> int:
+    """Altura de saida valida (ou o valor atual, se o cliente mandou lixo).
+    OverflowError cobre inf; ValueError cobre NaN e string sem numero."""
+    try:
+        v = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(RES_MIN, min(RES_MAX, v))
+
+
+def clamp_fps(value, fallback: int) -> int:
+    try:
+        v = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return fallback
+    return max(FPS_MIN, min(FPS_MAX, v))
+
+
+def clean_bitrate(value, fallback: str) -> str:
+    """Aceita so o formato que o ffmpeg entende ('12M', '3500k', '800000') E
+    que faz sentido como taxa. So a forma nao basta: '1.55' casa no regex mas
+    quer dizer 1,5 bit/s - o encoder aceitaria e cuspiria lixo. Fora da faixa
+    util (100 kbps a 100 Mbps) mantem o valor atual."""
+    if isinstance(value, bool) or not isinstance(value, (str, int, float)):
+        return fallback
+    s = str(value).strip()
+    if not _BITRATE_RE.match(s):
+        return fallback
+    return s if BITRATE_MIN_KBPS <= _kbps(s) <= BITRATE_MAX_KBPS else fallback
 
 
 # Escala UNICA de qualidade (a UI manda 1 nivel; o audio segue junto - ver

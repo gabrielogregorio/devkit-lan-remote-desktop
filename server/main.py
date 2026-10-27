@@ -152,18 +152,24 @@ class Hub:
 
     async def set_preset(self, name: str):
         # atalho: aplica os tres parametros do preset de uma vez.
-        if name in video.PRESETS:
+        # isinstance antes do `in`: o cliente pode mandar lista/dict (nao-hashable).
+        if isinstance(name, str) and name in video.PRESETS:
             self.preset_name = name
             self.settings = video.VideoSettings.from_preset(video.PRESETS[name])
             await self._restart()
 
     async def set_video(self, max_h=None, fps=None, bitrate=None):
-        """Override INDEPENDENTE de resolucao/fps/bitrate (sem trocar preset)."""
+        """Override INDEPENDENTE de resolucao/fps/bitrate (sem trocar preset).
+
+        Cada campo passa pelo saneamento do video.py: valor fora da faixa e
+        clampado e lixo (tipo errado, string sem sentido) mantem o valor atual.
+        Assim um 'vq' torto nunca derruba o encoder nem a conexao de input."""
         s = self.settings
         new = video.VideoSettings(
-            max_h=int(max_h) if max_h is not None else s.max_h,
-            fps=int(fps) if fps is not None else s.fps,
-            bitrate=str(bitrate) if bitrate is not None else s.bitrate,
+            max_h=video.clamp_res(max_h, s.max_h) if max_h is not None else s.max_h,
+            fps=video.clamp_fps(fps, s.fps) if fps is not None else s.fps,
+            bitrate=(video.clean_bitrate(bitrate, s.bitrate)
+                     if bitrate is not None else s.bitrate),
             name="custom",
         )
         if (new.max_h, new.fps, new.bitrate) == (s.max_h, s.fps, s.bitrate):
@@ -242,7 +248,8 @@ class AudioHub:
                 print("[audio] encoder OFF (sem ouvintes)")
 
     async def set_preset(self, name: str):
-        if name in audio.AUDIO_PRESETS and name != self.preset_name:
+        if (isinstance(name, str) and name in audio.AUDIO_PRESETS
+                and name != self.preset_name):
             self.preset_name = name
             async with self._lock:
                 if self._running:
@@ -325,6 +332,9 @@ async def api_gamepad_map_post(request):
         body = await request.json()
     except Exception:
         return web.json_response({"error": "json invalido"}, status=400)
+    # JSON valido mas que nao e objeto (lista, numero, string) -> 400, nao 500.
+    if not isinstance(body, dict):
+        return web.json_response({"error": "json invalido"}, status=400)
     pad_id = body.get("id")
     mapping = body.get("map")
     try:
@@ -339,6 +349,8 @@ async def api_gamepad_map_delete(request):
     try:
         body = await request.json()
     except Exception:
+        return web.json_response({"error": "json invalido"}, status=400)
+    if not isinstance(body, dict):
         return web.json_response({"error": "json invalido"}, status=400)
     try:
         removed = gamepad.delete_map(body.get("id"))
@@ -362,11 +374,18 @@ async def ws_input(request):
             data = json.loads(msg.data)
         except Exception:
             continue
+        # JSON valido mas sem forma de comando (lista, numero, null): ignora.
+        # Sem isso um `data.get` estoura e DERRUBA o canal de input inteiro -
+        # o usuario perde mouse/teclado ate o cliente reconectar.
+        if not isinstance(data, dict):
+            continue
         t = data.get("t")
         if t == "q":
             # atalho de preset: aplica video; o audio acompanha SO se o usuario
             # nao tiver assumido o controle manual do audio (audio_manual).
             preset = data.get("preset", "")
+            if not isinstance(preset, str):
+                continue
             await hub.set_preset(preset)
             if not ahub.manual and preset in AUDIO_FOR_QUALITY:
                 await ahub.set_preset(AUDIO_FOR_QUALITY[preset])
@@ -383,7 +402,12 @@ async def ws_input(request):
             await ahub.set_preset(data.get("preset", ""))
         elif t == "mon":
             idx = data.get("i")
-            await hub.set_monitor(None if idx is None else int(idx))
+            if idx is not None:
+                try:
+                    idx = int(idx)
+                except (TypeError, ValueError):
+                    continue          # indice invalido: ignora o comando
+            await hub.set_monitor(idx)
         else:
             try:
                 injector.handle(data)

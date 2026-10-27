@@ -148,6 +148,14 @@ describe("OSK (teclado virtual)", () => {
     expect(ctrl.classList.contains("held")).toBe(false);
   });
 
+  it("botão ✕ do próprio OSK fecha o teclado", () => {
+    app.toggleOSK(true);
+    const k = document.getElementById("osk");
+    k.querySelector(".osk-close").click();
+    expect(k.classList.contains("hidden")).toBe(true);
+    expect(document.getElementById("kbd").classList.contains("on")).toBe(false);
+  });
+
   it("clicar numa tecla real do OSK envia a tecla", () => {
     app.connectInput();
     app.buildOSK();
@@ -166,20 +174,28 @@ describe("recall da barra (mouse no topo)", () => {
     window.dispatchEvent(new MouseEvent("mousemove", { clientY: 2 }));
     expect(app.barHidden()).toBe(false);
   });
+  it("clique no canto da engrenagem (#menuRecall) traz a barra de volta", () => {
+    app.showBar(false);
+    document.getElementById("menuRecall").click();
+    expect(app.barHidden()).toBe(false);
+  });
   it("showBar(false) esconde", () => {
     app.showBar(false);
     expect(app.barHidden()).toBe(true);
   });
-  it("auto-hide: some sozinha após o timer (sem pointer lock)", () => {
+  it("sem auto-hide: aberta, só some pela engrenagem", () => {
     vi.useFakeTimers();
     Object.defineProperty(document, "pointerLockElement", {
       value: null, configurable: true,
     });
     window.dispatchEvent(new MouseEvent("mousemove", { clientY: 2 }));
     expect(app.barHidden()).toBe(false);
-    vi.advanceTimersByTime(2600);
-    expect(app.barHidden()).toBe(true);
+    vi.advanceTimersByTime(60000);
+    window.dispatchEvent(new MouseEvent("mousemove", { clientY: 500 }));
+    expect(app.barHidden()).toBe(false);
     vi.useRealTimers();
+    document.getElementById("menuToggle").click();
+    expect(app.barHidden()).toBe(true);
   });
   it("touchstart no topo (mobile) revela a barra", () => {
     document.getElementById("bar").classList.add("hidden");

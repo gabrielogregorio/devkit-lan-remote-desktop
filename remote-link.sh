@@ -24,11 +24,14 @@ warn() { printf '%s\n' "${c_yel}!${c_off} $*"; }
 die()  { printf '%s\n' "${c_red}✗${c_off} $*" >&2; exit 1; }
 
 # ---------------------------------------------------------------- args
-for a in "$@"; do
-  case "$a" in
-    --port) shift; PORT="${1:-$PORT}";;
-    --port=*) PORT="${a#*=}";;
-    setup) DO_SETUP=1;;
+# while+shift (e nao `for a in "$@"` com shift dentro): mexer na lista enquanto
+# se itera sobre ela faz "setup --port N" ler o argumento errado.
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --port) PORT="${2:-$PORT}"; shift 2 2>/dev/null || shift;;
+    --port=*) PORT="${1#*=}"; shift;;
+    setup) DO_SETUP=1; shift;;
+    *) shift;;
   esac
 done
 

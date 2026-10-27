@@ -29,6 +29,28 @@ def _i16(v: float) -> int:
     return max(-32768, min(32767, int(v)))
 
 
+def _axis(v) -> float:
+    """Eixo -1..1 seguro. NaN/inf/tipo errado viram 0 (centro)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if f != f:                       # NaN
+        return 0.0
+    return -1.0 if f < -1 else (1.0 if f > 1 else f)
+
+
+def _unit(v) -> float:
+    """Gatilho 0..1 seguro. NaN/inf/tipo errado viram 0 (solto)."""
+    try:
+        f = float(v)
+    except (TypeError, ValueError):
+        return 0.0
+    if f != f:
+        return 0.0
+    return 0.0 if f < 0 else (1.0 if f > 1 else f)
+
+
 class Injector:
     def __init__(self):
         self.pointer = UInput({
@@ -110,24 +132,34 @@ class Injector:
 
     # ---------- gamepad ----------
     def gamepad_state(self, axes: list, buttons: list, lt=None, rt=None):
+        # Um frame torto (tipo errado, NaN, campo faltando) nao pode escrever
+        # metade do estado e abortar no meio: o resto sairia junto com o proximo
+        # syn e o jogo veria botao/gatilho "preso". Entao tudo aqui e total -
+        # o que nao da pra interpretar vira neutro (solto/centro).
         gp = self.gamepad
+        if not isinstance(axes, (list, tuple)):
+            axes = []
+        if not isinstance(buttons, (list, tuple)):
+            buttons = []
         if len(axes) >= 4:
-            gp.write(e.EV_ABS, e.ABS_X,  _i16(axes[0] * 32767))
-            gp.write(e.EV_ABS, e.ABS_Y,  _i16(axes[1] * 32767))
-            gp.write(e.EV_ABS, e.ABS_RX, _i16(axes[2] * 32767))
-            gp.write(e.EV_ABS, e.ABS_RY, _i16(axes[3] * 32767))
+            gp.write(e.EV_ABS, e.ABS_X,  _i16(_axis(axes[0]) * 32767))
+            gp.write(e.EV_ABS, e.ABS_Y,  _i16(_axis(axes[1]) * 32767))
+            gp.write(e.EV_ABS, e.ABS_RX, _i16(_axis(axes[2]) * 32767))
+            gp.write(e.EV_ABS, e.ABS_RY, _i16(_axis(axes[3]) * 32767))
 
         def bval(i):
-            return buttons[i].get("v", 0.0) if i < len(buttons) else 0.0
+            b = buttons[i] if i < len(buttons) else None
+            return b.get("v", 0.0) if isinstance(b, dict) else 0.0
 
         def bpr(i):
-            return 1 if (i < len(buttons) and buttons[i].get("p")) else 0
+            b = buttons[i] if i < len(buttons) else None
+            return 1 if (isinstance(b, dict) and b.get("p")) else 0
 
         # Gatilhos: o cliente manda lt/rt explicitos (0..1) quando consegue
         # detectar (mapping nao-padrao usa eixos). Cai pros buttons[6]/[7]
         # so se o cliente nao mandou nada.
-        lz = lt if lt is not None else bval(6)
-        rz = rt if rt is not None else bval(7)
+        lz = _unit(lt if lt is not None else bval(6))
+        rz = _unit(rt if rt is not None else bval(7))
         # round (nao int): replica o valor 0..1 -> 0..255 linear sem enviesar
         # pra baixo. evdev deduplica valores iguais, entao reescrever o mesmo
         # ABS nao gera evento -> sem flicker.

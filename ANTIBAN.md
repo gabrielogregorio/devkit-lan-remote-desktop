@@ -88,6 +88,11 @@ python -m server.guardian --check    # pré-flight: exit 0 = limpo, 3 = bloquead
 python -m server.guardian --list     # mostra tudo que é bloqueado
 ```
 
+Testes: `tests/test_guardian.py` cobre detecção (Linux e Windows), avisos e o
+desligamento; `tests/test_script.py::test_guardian_bloqueia_antes_de_subir_qualquer_coisa`
+garante que, com o guardian reprovando, o `remote-link.sh` **não** gera
+certificado nem sobe o servidor. Ver [TESTING.md](TESTING.md).
+
 ## Desligar (por sua conta e risco)
 
 ```bash

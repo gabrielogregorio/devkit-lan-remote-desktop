@@ -44,15 +44,22 @@ Por quê:
 remote-link.sh      # único entrypoint: detecta display/IP, venv, cert TLS, sobe o server
 server/
   main.py           # aiohttp: HTTPS + WSS /ws/video /ws/audio /ws/input; Hub + AudioHub
-  video.py          # detect_encoder(), Presets, get_monitors(), ScreenEncoder (ffmpeg)
+  video.py          # detect_encoder(), Presets, get_monitors(), ScreenEncoder (ffmpeg),
+                    #   saneadores do canal 'vq' (clamp_res/clamp_fps/clean_bitrate)
   inject.py         # Injector: pointer absoluto + teclado + gamepad Xbox360 via uinput
   keymap.py         # KeyboardEvent.code -> ecodes evdev
   audio.py          # AudioEncoder (ffmpeg Opus), OggOpusParser, AudioPresets, list_monitors()
+  gamepad.py        # persistência dos perfis de remap (~/.config/remote-link/gamepad-map.json)
   guardian.py       # escape hatch anti-ban: bloqueia/derruba se achar anticheat/jogo online
 web/
   index.html / style.css / app.js   # cliente WebCodecs (sem build, JS puro)
+  gamepad-debug.html                # página de diagnóstico de gamepad (script inline)
+tests/              # pytest (servidor): unit, integração, fuzz, parsers, script, docs
+web/__tests__/      # vitest + jsdom (cliente)
+web/e2e/            # playwright (servidor real + browser real)
+pytest.ini  .coveragerc  vitest.config.js  playwright.config.js  package.json
 requirements.txt    # aiohttp, evdev
-certs/  .venv/       # gerados em runtime - NÃO versionar (estão no .gitignore)
+certs/  .venv/  node_modules/   # gerados em runtime - NÃO versionar (estão no .gitignore)
 ```
 
 ## Como rodar / testar
@@ -61,17 +68,39 @@ certs/  .venv/       # gerados em runtime - NÃO versionar (estão no .gitignore
 ./remote-link.sh                 # produção (porta 8443)
 ./remote-link.sh --port 9000
 ./remote-link.sh setup           # libera /dev/uinput (uma vez, com sudo)
-
-# checagens de sintaxe rápidas:
-python3 -m py_compile server/*.py
-node --check web/app.js
-bash -n remote-link.sh
 ```
 
-Variáveis: `RL_PRESET` (ultra/high/medium/low/potato), `RL_ENCODER`
-(nvenc/vaapi/x264), `RL_PORT`, `RL_DISPLAY`, `RL_XAUTHORITY`, `RL_HOST`,
-`RL_CERT`, `RL_KEY`, `RL_RENDER_NODE`, `RL_GUARDIAN` (`off` desliga o escape
-hatch anti-ban - ver `ANTIBAN.md`).
+**Antes de commitar, rode as três suítes** (detalhes e mapa do que cada arquivo
+cobre em **`TESTING.md`**):
+
+```bash
+./.venv/bin/python -m pytest --cov=server    # servidor: gate de 100% (.coveragerc)
+npm run test:web                             # cliente (vitest+jsdom): gate no vitest.config.js
+npm run test:e2e                             # ponta a ponta (sobe o server real + Chromium)
+```
+
+Checagens de sintaxe (rápidas, mas **não substituem** as suítes):
+
+```bash
+python3 -m py_compile server/*.py && node --check web/app.js && bash -n remote-link.sh
+```
+
+| variável | efeito |
+|---|---|
+| `RL_PRESET` | preset inicial de vídeo: `ultra`/`high`/`medium`/`low`/`potato` |
+| `RL_ENCODER` | força `nvenc`/`vaapi`/`x264` (pula o autodetect) |
+| `RL_RENDER_NODE` | nó DRM do VAAPI (padrão `/dev/dri/renderD128`) |
+| `RL_AUDIO_PRESET` | preset inicial de áudio: `alta`/`media`/`baixa`/`voz` |
+| `RL_AUDIO_SOURCE` | força a fonte de áudio (padrão `@DEFAULT_MONITOR@`) |
+| `RL_PORT` / `RL_HOST` | porta e bind (padrão `8443` / `0.0.0.0`) |
+| `RL_CERT` / `RL_KEY` | caminho do par TLS (o `.sh` gera em `certs/` se faltar) |
+| `RL_DISPLAY` / `RL_XAUTHORITY` | display X (o `.sh` autodetecta pelo `gnome-shell`) |
+| `RL_GAMEPAD_MAP` | arquivo dos perfis de remap (padrão `~/.config/remote-link/`) |
+| `RL_GUARDIAN` | `off` desliga o escape hatch anti-ban - ver `ANTIBAN.md` |
+| `RL_GUARDIAN_INTERVAL` | intervalo (s) da varredura do guardian (padrão `2.0`) |
+
+Os testes usam `RL_GUARDIAN=off` e `RL_ENCODER=x264` (`tests/conftest.py`) pra
+não depender do hardware nem do escape hatch.
 
 ### Cuidado ao testar localmente
 - WebCodecs exige **secure context** → o server só serve sentido em **HTTPS**.
@@ -80,6 +109,13 @@ hatch anti-ban - ver `ANTIBAN.md`).
   desliga quando o último sai). Não espere ffmpeg rodando sem cliente.
 - O render WebCodecs no browser precisa de um navegador real para validação
   visual - `py_compile`/`node --check` só pegam sintaxe.
+- `pytest` e `vitest` rodam sem X11, sem GPU e sem `/dev/uinput` (tudo dublado).
+  Só o `npm run test:e2e` sobe servidor de verdade; o teste que captura tela se
+  auto-pula sem `DISPLAY`.
+- `web/app.js` termina com um **seam de teste**: `module.exports = {...}` quando
+  existe `module` (Node/vitest), senão `boot()`. **Não remova** - é o que
+  permite testar o cliente sem bundler. Função nova que precise de teste entra
+  nessa lista.
 
 ## Endpoints HTTP
 
@@ -103,6 +139,11 @@ PS2/USB); `🎮↺` apaga o perfil e volta à passagem direta. Gatilhos LT/RT s�
 replicados fiéis (`clamp01` no cliente, `round(v*255)` no servidor) - sem
 deadzone/rescale.
 
+O `pollPads()` só reenvia quando o estado muda **na resolução do destino**
+(eixo → int16, botão/gatilho → byte 0..255): o valor que vai no fio continua
+sendo o cru, mas comparar float faria o micro-ruído do controle gerar
+mensagem 60×/s à toa.
+
 ## Protocolo dos WebSockets
 
 `/ws/video` (binário): servidor → cliente, cada mensagem = 1 Access Unit H.264
@@ -116,7 +157,7 @@ no `AudioContext`. Liga só com ≥1 ouvinte conectado.
 `/ws/input` (texto JSON): cliente → servidor.
 - `{"t":"m","x":0..1,"y":0..1}` mover mouse (absoluto, normalizado na região)
 - `{"t":"mr","dx","dy"}` mover relativo (pointer-lock)
-- `{"t":"md"/"mu","b":N}` botão down/up
+- `{"t":"md","b":N}` / `{"t":"mu","b":N}` botão do mouse down/up
 - `{"t":"w","x","y"}` scroll
 - `{"t":"k","code":"KeyA","down":true}` tecla
 - `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...],"lt":0..1,"rt":0..1}`
@@ -131,6 +172,33 @@ no `AudioContext`. Liga só com ≥1 ouvinte conectado.
 - `{"t":"aq","preset":"media"}` qualidade de **áudio independente** (marca
   `AudioHub.manual=True` → desliga o arrasto do `q`).
 - `{"t":"mon","i":0}` trocar monitor (`i:null` = primário)
+
+### Robustez do canal de input (regra, não detalhe)
+
+O `/ws/input` é **LAN aberta**: qualquer coisa pode chegar nele, e uma exceção
+que escape do handler **derruba o WebSocket inteiro** - o usuário perde mouse e
+teclado até o cliente reconectar. Por isso:
+
+- payload que não é objeto JSON (`[]`, `5`, `null`, `"txt"`) é **ignorado**;
+- `preset` não-string é ignorado (`x in DICT` com lista/dict levanta
+  `TypeError: unhashable`);
+- `vq` passa por `video.clamp_res` / `clamp_fps` / `clean_bitrate`: fora da
+  faixa é **clampado**, lixo **mantém o valor atual**. Faixas: altura
+  144–2160, fps 5–240, bitrate 100 kbps–100 Mbps no formato do ffmpeg
+  (`12M`/`3500k`/`800000`);
+- `mon` com índice não-inteiro é ignorado;
+- o resto vai pro `injector.handle()` dentro de `try/except` (mouse/teclado
+  falham limpo antes de escrever qualquer coisa);
+- `gamepad_state()` é **total**: tipo errado/NaN/campo faltando vira neutro
+  (solto/centro) e o frame **sempre** termina em `syn()` - meio-frame escrito
+  é o que gera botão preso e gatilho fantasma;
+- `/api/gamepad-map` responde **400** (não 500) pra JSON que não seja objeto.
+
+Cliente (`web/app.js`) faz o simétrico: `padNum`/`clamp01` garantem que nunca
+sai NaN/Infinity no JSON, e `pollPads()` roda dentro de `try/catch` - se a
+exceção escapar, o `requestAnimationFrame` do fim não roda e **o gamepad morre
+pelo resto da sessão**. Ao mexer nesses caminhos, rode
+`tests/test_fuzz_input.py` e `web/__tests__/protocol.test.js`.
 
 Encoder H.264 tunado p/ baixa latência: GOP ~1s (ressync rápido p/ cliente novo
 sem tela preta longa; na LAN banda sobra), VBV pequeno (`_lowlat_bufsize` ~1/3
@@ -150,6 +218,13 @@ senão dá erro "key frame is required" no Firefox e no Chrome.
 - Cliente web é **JS puro, sem build/bundler** - mantenha assim.
 - Latência acima de features. Antes de adicionar buffering/qualidade, pense no lag.
 - Nunca versione `certs/` (chave privada) nem `.venv/`.
+- **Todo campo novo do protocolo nasce com saneamento e teste**: um valor
+  inesperado não pode derrubar conexão nem encoder (ver "Robustez" acima).
+- **Doc junto com o código.** `tests/test_docs_sync.py` falha se um endpoint,
+  um tipo de mensagem, um preset ou uma `RL_*` existir no código e não aparecer
+  aqui/no README. Se o teste reclamar, a doc é que está errada.
+- Cobertura do servidor tem gate de **100%** (`.coveragerc`); o cliente tem
+  limiares no `vitest.config.js`. Código novo vem com teste no mesmo commit.
 
 ## Próximos passos possíveis (ainda não feitos)
 
@@ -160,6 +235,16 @@ senão dá erro "key frame is required" no Firefox e no Chrome.
 - Autenticação (PIN/token) - hoje é LAN aberta atrás do TLS self-signed.
 
 ## Feito
+- **Suíte de testes em 4 camadas** (`TESTING.md`): unit (pytest/vitest),
+  integração real de WebSocket (`tests/test_integration_ws.py`), fuzz e
+  propriedade (`test_fuzz_input.py`, `test_parsers_property.py`,
+  `web/__tests__/protocol.test.js`), entrypoint em sandbox
+  (`tests/test_script.py`), e2e no browser (`web/e2e/`). Gate de 100% no
+  servidor; guarda anti-drift da doc em `tests/test_docs_sync.py`.
+- **Endurecimento contra entrada hostil**: `/ws/input` e `/api/gamepad-map`
+  ignoram/recusam payload torto em vez de derrubar a conexão; `vq` é clampado;
+  `gamepad_state()` virou total; no cliente, `pollPads()` não morre mais se o
+  controle entregar valor inválido (ver "Robustez do canal de input").
 - **Áudio**: canal Opus via `/ws/audio` com qualidade ajustável em runtime
   (presets `alta`/`media`/`baixa`/`voz`). Ver `server/audio.py`.
 - **Escape hatch anti-banimento** (`server/guardian.py`): roda **antes** de

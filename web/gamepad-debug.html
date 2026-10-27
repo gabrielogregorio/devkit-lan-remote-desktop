@@ -45,6 +45,24 @@ function barUnit(v) {
   return `<span class="bar" style="width:${w}px"></span>`;
 }
 
+// histórico por controle: pra cada botão/eixo, guarda min/max visto e quantas
+// vezes "oscilou" (subiu e desceu). É o que denuncia o gatilho bugado.
+const hist = {}; // key: padIndex -> {btn:[{min,max,flips,last,dir}], axis:[...]}
+function track(slot, i, v, store) {
+  if (!store[i]) store[i] = { min: v, max: v, flips: 0, last: v, dir: 0 };
+  const h = store[i];
+  if (v < h.min) h.min = v;
+  if (v > h.max) h.max = v;
+  const dv = v - h.last;
+  if (Math.abs(dv) > 0.02) {
+    const nd = dv > 0 ? 1 : -1;
+    if (h.dir !== 0 && nd !== h.dir) h.flips++; // mudou de direção = oscilação
+    h.dir = nd;
+  }
+  h.last = v;
+  return h;
+}
+
 function render() {
   const pads = navigator.getGamepads ? navigator.getGamepads() : [];
   let html = "";
@@ -52,6 +70,8 @@ function render() {
   for (const p of pads) {
     if (!p) continue;
     any = true;
+    if (!hist[p.index]) hist[p.index] = { btn: {}, axis: {} };
+    const H = hist[p.index];
     html += `<div class="pad">`;
     html += `<div class="id">id: ${p.id}</div>`;
     html += `<div>mapping: <span class="map">${p.mapping || "(vazio / NÃO-standard)"}</span>`;
@@ -59,21 +79,31 @@ function render() {
     html += `<div class="cols">`;
 
     // botões
-    html += `<div class="col"><table>`;
+    html += `<div class="col"><table><tr><td class="lbl">botão</td><td></td>`
+      + `<td>valor</td><td>min..max</td><td>osc.</td><td></td></tr>`;
     p.buttons.forEach((b, i) => {
+      const h = track("btn", i, b.value, H.btn);
       const cls = b.pressed ? "on" : "off";
+      const flip = h.flips > 3 ? `<span class="on">${h.flips}⚠</span>` : h.flips;
       html += `<tr><td class="lbl">btn[${i}]</td>`
         + `<td class="${cls}">${b.pressed ? "▮" : "▯"}</td>`
         + `<td>${b.value.toFixed(3)}</td>`
+        + `<td>${h.min.toFixed(2)}..${h.max.toFixed(2)}</td>`
+        + `<td>${flip}</td>`
         + `<td>${barUnit(b.value)}</td></tr>`;
     });
     html += `</table></div>`;
 
     // eixos
-    html += `<div class="col"><table>`;
+    html += `<div class="col"><table><tr><td class="lbl">eixo</td>`
+      + `<td>valor</td><td>min..max</td><td>osc.</td><td></td></tr>`;
     p.axes.forEach((v, i) => {
+      const h = track("axis", i, v ?? 0, H.axis);
+      const flip = h.flips > 3 ? `<span class="on">${h.flips}⚠</span>` : h.flips;
       html += `<tr><td class="lbl">axis[${i}]</td>`
         + `<td>${(v ?? 0).toFixed(3)}</td>`
+        + `<td>${h.min.toFixed(2)}..${h.max.toFixed(2)}</td>`
+        + `<td>${flip}</td>`
         + `<td>${bar(v ?? 0)}</td></tr>`;
     });
     html += `</table></div>`;

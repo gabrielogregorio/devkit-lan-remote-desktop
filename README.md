@@ -74,23 +74,33 @@ Variáveis de ambiente úteis:
 | `RL_AUDIO_SOURCE` | força a fonte de áudio (padrão segue o sink default) |
 | `RL_PORT`         | porta                                          |
 | `RL_DISPLAY`      | display X (auto-detectado)                      |
+| `RL_GAMEPAD_MAP`  | onde salvar os perfis de remap de gamepad       |
+| `RL_GUARDIAN`     | `off` desliga a trava anti-banimento (veja `ANTIBAN.md`) |
 
-### Qualidade × FPS
+### Qualidade: um atalho + três controles finos
 
-A qualidade é um **estado único**: o nível escolhido na página ajusta vídeo
-**e** áudio juntos (o encoder reinicia na hora). A faixa vai de nítido a
-ultra-leve - quanto mais baixo, mais leve a transmissão e menos lag (e o áudio
-acompanha). `fps` fica em 60 até `low`; só `potato` cai pra 30 (piso pra rede
-ruim). Como a fonte normalmente é 1080p, pedir mais que isso não "sobe" nada -
-por isso o topo é 1080p nítido.
+O seletor de **qualidade** é um atalho: aplica resolução, fps e bitrate de uma
+vez (e o áudio acompanha, enquanto você não escolher o som na mão). Ao lado
+dele ficam os controles **independentes** - resolução, fps, bitrate e áudio -
+pra afinar cada um por si. Mexeu em qualquer um, o encoder reinicia na hora e a
+página vira "custom".
 
-| nível   | resolução máx | fps | bitrate vídeo | áudio          |
-|---------|---------------|-----|---------------|----------------|
+| atalho  | resolução máx | fps | bitrate vídeo | áudio junto     |
+|---------|---------------|-----|---------------|-----------------|
 | ultra   | 1080p         | 60  | 25 Mbps       | alta (256 kbps) |
 | high    | 900p          | 60  | 12 Mbps       | alta (256 kbps) |
 | medium  | 720p          | 60  | 7 Mbps        | media (128 kbps) |
 | low     | 540p          | 60  | 3,5 Mbps      | baixa (64 kbps) |
-| potato  | 360p          | 30  | 1,2 Mbps      | voz (48 kbps)  |
+| potato  | 360p          | 30  | 1,2 Mbps      | voz (48 kbps)   |
+
+Faixas dos controles finos: resolução `360…1080p`, fps `30…120`, bitrate
+`1200k…25M`. Como a fonte normalmente é 1080p, pedir mais não "sobe" nada - o
+que abre a faixa de verdade é **descer** resolução e bitrate: mais leve de
+decodificar no celular e menos lag. `fps` fica em 60 até `low`; só `potato` cai
+pra 30 (piso pra rede ruim).
+
+Escolheu o áudio na mão? A partir daí o atalho de qualidade **não mexe mais no
+som** - o nível de áudio é seu.
 
 ---
 
@@ -104,9 +114,34 @@ por isso o topo é 1080p nítido.
 - **⌨**: abre o teclado virtual no mobile.
 - **⛶**: tela cheia.
 - **Gamepad**: conecte um controle Xbox no device; é detectado e repassado
-  automaticamente.
-- **qualidade / monitor**: troca o nível de qualidade (vídeo + áudio juntos) e
-  qual monitor capturar.
+  automaticamente (veja abaixo).
+- **qualidade / resolução / fps / bitrate / áudio / monitor**: o atalho de
+  qualidade e os controles finos de cada parâmetro, além de qual monitor
+  capturar.
+
+---
+
+## Gamepad
+
+Controle **Xbox (e a maioria dos modernos)**: conecte no celular/notebook e
+pronto - o navegador reporta `mapping: "standard"` e o cliente **repassa direto**,
+botão por botão, sem tradução nenhuma. Não precisa configurar nada.
+
+Controle **PS2/USB "pirata"** costuma reportar mapping vazio, com botões e
+gatilhos em índices arbitrários. Para esses:
+
+- **🎮 remapear**: assistente "aperte o botão X" - passa por cada botão, os dois
+  gatilhos e os dois sticks. O gatilho é **calibrado** (mede repouso e fundo),
+  o que evita o clássico "gatilho meio apertado parado" que virava double click.
+  O perfil é salvo **no servidor** por `gamepad.id`, então vale de qualquer
+  device que acessar este host.
+- **🎮↺ resetar**: apaga o perfil e volta à passagem direta.
+- **`/gamepad-debug.html`**: página de diagnóstico. Mostra ao vivo `mapping`,
+  cada `buttons[i]` e `axes[i]`, a faixa (min..max) já vista e um contador de
+  **oscilação** - é ele que denuncia o gatilho que fica pulando sozinho. Abra
+  antes de remapear pra entender o que o seu controle reporta.
+
+Remapear um controle *standard* é bloqueado de propósito: só estragaria.
 
 ---
 
@@ -131,9 +166,35 @@ permissão, rode uma vez:
 
 ---
 
+## Trava anti-banimento
+
+O remote-link injeta entrada sintética e um gamepad Xbox **virtual** - pra um
+anticheat isso é indistinguível de cheat. Então existe um **escape hatch**: se
+houver anticheat ou jogo online da lista rodando, o servidor **não inicia**, e
+se um deles abrir enquanto ele está no ar, tudo cai na hora (o controle virtual
+some, o ffmpeg morre). Detalhes, lista completa e como desligar (`RL_GUARDIAN=off`,
+por sua conta e risco): **[ANTIBAN.md](ANTIBAN.md)**.
+
+---
+
+## Desenvolvimento
+
+```bash
+./.venv/bin/python -m pytest --cov=server   # servidor (gate de 100%)
+npm install && npm run test:web             # cliente (vitest + jsdom)
+npm run test:e2e                            # ponta a ponta (server real + Chromium)
+```
+
+A estratégia de teste - o que cada camada cobre e como escrever teste novo -
+está em **[TESTING.md](TESTING.md)**. Guia de arquitetura pra quem for mexer no
+código: **[CLAUDE.md](CLAUDE.md)**.
+
+---
+
 ## Limitações conhecidas
 
 - Captura de vídeo é **X11** (`x11grab`); Wayland puro não é suportado.
 - Áudio captura o **mix do sistema** (sink default); seleção de app específico
   ainda não tem UI (use `RL_AUDIO_SOURCE` p/ forçar uma fonte).
 - Self-signed: o aviso de certificado é esperado em rede local.
+- Sem autenticação: é LAN aberta atrás do TLS. Não exponha na internet.
