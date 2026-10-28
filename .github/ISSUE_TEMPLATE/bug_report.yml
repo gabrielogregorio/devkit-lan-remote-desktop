@@ -1,0 +1,61 @@
+name: Bug report
+description: The page does not open, the screen stays black, the sound is missing or the mouse, keyboard or gamepad does not act on the PC
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Include the status and the stats shown on the bar and any error printed by `./run.sh`.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. `./run.sh` on the PC
+        2. Open https://<pc-ip>:8443 on the device and accept the certificate
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Output of `cat VERSION`
+      placeholder: 1.0.0
+    validations:
+      required: true
+  - type: input
+    id: device
+    attributes:
+      label: Device and browser
+      placeholder: Android tablet, Chrome 140 / laptop, Firefox 140
+    validations:
+      required: true
+  - type: input
+    id: system
+    attributes:
+      label: PC
+      description: Distro and version, session type (must be X11), GPU and the encoder shown on the bar (nvenc, vaapi or x264)
+      placeholder: Ubuntu 24.04, X11, NVIDIA, nvenc
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Server log
+      description: Output of `./run.sh` (lines starting with [hub], [audio], [ffmpeg], [input])
+      render: text
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, the gamepad page `/gamepad-debug.html`, output of `getfacl /dev/uinput`

@@ -1,0 +1,22 @@
+name: Feature request
+description: A new control, quality option or input on the client, or a change in how the PC captures or receives input
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do and what gets in the way today
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: The solution you would like
+      description: e.g. "PIN on connect", "Wayland capture", "pick the audio app"
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
