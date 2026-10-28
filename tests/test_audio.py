@@ -25,6 +25,7 @@ def test_default_monitor_token(monkeypatch):
 
 def test_list_monitors_parse(monkeypatch):
     ffmpeg_output = (
+        "Auto-detected sources for pulse:\n"  # header line: not a source, skipped
         "  * alsa_output.pci.analog-stereo.monitor [Monitor of Built-in Audio Stereo]\n"
         "  alsa_output.pci.hdmi-stereo.monitor [Monitor of HDMI Stereo]\n"
         "  alsa_input.pci.analog-stereo [Built-in Input]\n"
