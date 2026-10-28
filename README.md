@@ -82,14 +82,20 @@ Built and tested on Ubuntu 24.04 (X11).
    ```
 4. **On the other device:** Chrome or Edge at the printed address; accept the certificate warning
    (self-signed) the first time.
-5. **Optional, top bar icon:** the companion tray app (`devkit-bandeja-apps`, cloned next to this
-   folder) turns the server on and off and shows a QR code with the address, so the device does
-   not need it typed:
+5. **Top bar icon (optional):** `./tray_icon.py --install` puts an icon on the top bar at every
+   login, gray while off. Its menu turns the server on and off; turning it on opens a QR code with
+   the address, so the device does not need it typed:
 
    <img src="docs/tray-qr-code.png" alt="Top bar menu of the screen icon: LAN Remote Desktop on air on port 8443, On (checked), the address for the device, Show QR code, Open in the browser, View log; next to it the QR code window with the https address and the certificate note" width="640">
 
-   Its menu is in Brazilian Portuguese (Ligado = On, Mostrar QR code = Show QR code). The address
-   is the PC's local IP, so the QR code only works on the same network.
+   The menu follows the system language (the screenshot is in Brazilian Portuguese: Ligado = On,
+   Mostrar QR code = Show QR code). The address is the PC's local IP, so the QR code only works on
+   the same network. The QR code needs `sudo apt install python3-segno`; without it the window
+   shows only the address. `./tray_icon.py --remove` takes the icon out of the login.
+
+   Menu: the status line ("LAN Remote Desktop (PC screen on the LAN): on air (port 8443)"),
+   **On** (starts or stops the server), the address for the device, **Show QR code**, **Open in
+   the browser**, **View log** (the server output). A middle click on the icon toggles it.
 6. **Tests (optional):** `npm ci` (needs `nodejs`/`npm`), then see [Tests](#tests).
 
 **Outside the repository:**
@@ -112,6 +118,10 @@ Changed the network or the IP and the browser complains about the certificate? M
 ./run.sh --port 9000        # another port
 ./run.sh setup              # grant /dev/uinput access (once, with sudo)
 LRD_PRESET=low ./run.sh     # start lighter
+
+# Top bar icon (on/off, QR code), at every login
+./tray_icon.py --install
+./tray_icon.py --remove
 
 # Test (never opens /dev/uinput: nothing moves your mouse)
 ./run-tests.sh                                     # lint + server (100% gate) + web client
@@ -202,7 +212,7 @@ Issues use forms (`bug_report.yml`, `feature_request.yml`); PRs start from `pull
 
 ## Usage
 
-1. Start the server on the PC: `./run.sh` (or the tray app).
+1. Start the server on the PC: `./run.sh` (or the top bar icon).
 2. **On the device** (on the **same network**): open `https://<pc-ip>:8443`, accept the
    certificate the first time and tap **Connect**.
 3. Use the bar at the top (⚙ hides it; tap the corner where it was to bring it back):
@@ -282,6 +292,7 @@ HTTP: `GET /api/monitors` (current config, presets and ranges), `GET`/`POST`/`DE
 
 ```
 server/main.py       aiohttp: HTTPS + /ws/video /ws/audio /ws/input, video and audio hubs, /api/*
+tray_icon.py         top bar icon: turns the server on and off, QR code, --install for the login
 server/video.py      encoder detection, presets, monitors (xrandr), ffmpeg H.264, quality sanitizers
 server/audio.py      ffmpeg Opus, incremental Ogg/Opus parser, audio presets
 server/inject.py     uinput pointer + keyboard + Xbox 360 pad; no-op injector with LRD_INPUT=off

@@ -40,6 +40,8 @@ Why:
 ```
 run.sh              # the only entry point: detects display/IP, venv, TLS cert, starts the server
 run-tests.sh        # every test layer, same commands as the CI
+tray_icon.py        # top bar icon (system python3 + AppIndicator): starts/stops ./run.sh, QR code;
+                    #   --install puts it in the login autostart, off; strings in its own PT_BR
 server/
   main.py           # aiohttp: HTTPS + WSS /ws/video /ws/audio /ws/input; Hub + AudioHub; /api/*
   video.py          # detect_encoder(), presets, get_monitors(), ScreenEncoder (ffmpeg),

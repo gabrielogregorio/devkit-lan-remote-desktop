@@ -1,6 +1,6 @@
 [project]
 name = "devkit-lan-remote-desktop"
-version = "1.0.0"
+version = "1.1.0"
 description = "The Ubuntu PC screen on any device of the local network through the browser, with mouse, keyboard and Xbox gamepad control: aiohttp server, hardware H.264 over WebCodecs, Opus audio and /dev/uinput input"
 requires-python = "==3.12.*"
 dependencies = [
@@ -43,7 +43,7 @@ extend-exclude = ["node_modules"]
 select = ["E", "F", "W", "B", "I", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["server", "tests"]
+known-first-party = ["server", "tests", "tray_icon"]
 
 [tool.uv]
 # "Virtual" project: not an installable package, only scripts (server/, run.sh).
