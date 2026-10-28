@@ -23,6 +23,10 @@
 [![Lint](https://github.com/gabrielogregorio/devkit-lan-remote-desktop/actions/workflows/check-quality.yml/badge.svg)](https://github.com/gabrielogregorio/devkit-lan-remote-desktop/actions/workflows/check-quality.yml)
 [![CodeQL](https://github.com/gabrielogregorio/devkit-lan-remote-desktop/actions/workflows/codeql-analysis.yml/badge.svg)](https://github.com/gabrielogregorio/devkit-lan-remote-desktop/actions/workflows/codeql-analysis.yml)
 
+<br>
+
+<img src="docs/remote-desktop-in-browser.png" alt="The Ubuntu desktop streamed into a Chrome tab at https://192.168.0.106:8443, with the bottom bar: preset high, resolution 900p, 60 fps, bitrate 12M, audio medium, monitor HDMI-0, sound, mouse, keyboard, gamepad remap, full screen and the Alt+F4, Alt+Tab, Ctrl+Alt+Del and Super shortcuts; the stats read 60 fps, 12.0 Mbps, about 17 ms" width="820">
+
 </div>
 
 ## About
@@ -79,8 +83,13 @@ Built and tested on Ubuntu 24.04 (X11).
 4. **On the other device:** Chrome or Edge at the printed address; accept the certificate warning
    (self-signed) the first time.
 5. **Optional, top bar icon:** the companion tray app (`devkit-bandeja-apps`, cloned next to this
-   folder) turns the server on and off and shows a QR code with the address. Its menu is in
-   Brazilian Portuguese.
+   folder) turns the server on and off and shows a QR code with the address, so the device does
+   not need it typed:
+
+   <img src="docs/tray-qr-code.png" alt="Top bar menu of the screen icon: LAN Remote Desktop on air on port 8443, On (checked), the address for the device, Show QR code, Open in the browser, View log; next to it the QR code window with the https address and the certificate note" width="640">
+
+   Its menu is in Brazilian Portuguese (Ligado = On, Mostrar QR code = Show QR code). The address
+   is the PC's local IP, so the QR code only works on the same network.
 6. **Tests (optional):** `npm ci` (needs `nodejs`/`npm`), then see [Tests](#tests).
 
 **Outside the repository:**
@@ -284,6 +293,7 @@ web/                 the client: index.html, style.css, app.js (no build), i18n.
 web/__tests__/       Vitest + jsdom          web/e2e/   Playwright
 tests/               pytest (fakes in tests/helpers.py)
 run.sh run-tests.sh  entry point, test runner
+docs/                README screenshots
 .github/             workflows, composite action, issue forms, PR template
 ```
 
