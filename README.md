@@ -92,6 +92,10 @@ Built and tested on Ubuntu 24.04 (X11).
    Mostrar QR code = Show QR code). The address is the PC's local IP, so the QR code only works on
    the same network. The QR code needs `sudo apt install python3-segno`; without it the window
    shows only the address. `./tray_icon.py --remove` takes the icon out of the login.
+
+   Menu: the status line ("LAN Remote Desktop (PC screen on the LAN): on air (port 8443)"),
+   **On** (starts or stops the server), the address for the device, **Show QR code**, **Open in
+   the browser**, **View log** (the server output). A middle click on the icon toggles it.
 6. **Tests (optional):** `npm ci` (needs `nodejs`/`npm`), then see [Tests](#tests).
 
 **Outside the repository:**

@@ -51,7 +51,7 @@ def test_belongs_by_cwd_or_command_line(tmp_path):
 
 
 def test_status_texts():
-    name, port = tray.APP["name"], tray.APP["port"]
+    name, port = f"{tray.APP['name']} ({tray.APP['about']})", tray.APP["port"]
     assert tray.status_text(True, False) == f"{name}: on air (port {port})"
     assert tray.status_text(False, True) == f"{name}: starting…"
     assert tray.status_text(False, False) == f"{name}: off"
@@ -73,7 +73,7 @@ def test_lan_url():
 
 
 def test_every_string_has_a_pt_br_line():
-    used = set(TR_CALL.findall((ROOT / "tray_icon.py").read_text(encoding="utf-8")))
+    used = set(TR_CALL.findall((ROOT / "tray_icon.py").read_text(encoding="utf-8"))) | {tray.APP["about"]}
     assert used - set(tray.PT_BR) == set(), "add these to PT_BR in tray_icon.py"
     assert set(tray.PT_BR) - used == set(), "no longer used, remove from PT_BR in tray_icon.py"
     for en, pt in tray.PT_BR.items():
@@ -88,6 +88,7 @@ def test_language():
     assert tray.detect_language({lang_env: "en", "LANG": "pt_BR.UTF-8"}) == "en"
     assert tray.tr("On", lang="pt-BR") == "Ligado"
     assert tray.tr("{name}: off", lang="pt-BR", name="X") == "X: desligado"
+    assert tray.tr(tray.APP["about"], lang="pt-BR") == tray.PT_BR[tray.APP["about"]]
 
 
 @pytest.fixture

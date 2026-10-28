@@ -27,6 +27,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 APP = {
     "slug": "devkit-lan-remote-desktop",
     "name": "LAN Remote Desktop",
+    "about": "PC screen on the LAN",  # what it is, next to the name on the menu (pt-BR line in PT_BR)
     "cmd": ["./run.sh"],
     "env": {},
     "port": 8443,
@@ -52,6 +53,7 @@ TICK_MS = 2000
 # English is the source text and the key; PT_BR holds the Brazilian Portuguese line.
 # tests/test_tray_icon.py fails on a missing line, on different {placeholders} or on an unused line.
 PT_BR = {
+    "PC screen on the LAN": "tela do PC na LAN",
     "{name}: on air (port {port})": "{name}: no ar (porta {port})",
     "{name}: starting…": "{name}: ligando…",
     "{name}: off": "{name}: desligado",
@@ -149,12 +151,17 @@ def belongs(pid: int, folder: str = HERE, proc: str = "/proc") -> bool:
         return False
 
 
+def title() -> str:
+    """Name plus what it is, so the menu says more than the icon: "LAN Webcam (camera over the network)"."""
+    return f"{APP['name']} ({tr(APP['about'])})"
+
+
 def status_text(on_air: bool, starting: bool) -> str:
     if on_air:
-        return tr("{name}: on air (port {port})", name=APP["name"], port=APP["port"])
+        return tr("{name}: on air (port {port})", name=title(), port=APP["port"])
     if starting:
-        return tr("{name}: starting…", name=APP["name"])
-    return tr("{name}: off", name=APP["name"])
+        return tr("{name}: starting…", name=title())
+    return tr("{name}: off", name=title())
 
 
 def failure_note(code, last_log_line: str) -> str:
@@ -185,7 +192,7 @@ def desktop_entry() -> str:
         "[Desktop Entry]\n"
         "Type=Application\n"
         f"Name={APP['name']}\n"
-        f"Comment=Top bar icon that turns {APP['name']} on and off\n"
+        f"Comment=Top bar icon that turns {APP['name']} on and off: {APP['about']}\n"
         f"Exec=/usr/bin/python3 {os.path.join(HERE, 'tray_icon.py')}\n"
         f"Icon={os.path.join(ICONS, APP['slug'] + '-on.svg')}\n"
         "Terminal=false\n"
