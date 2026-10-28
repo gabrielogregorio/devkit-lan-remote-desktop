@@ -43,7 +43,7 @@ extend-exclude = ["node_modules"]
 select = ["E", "F", "W", "B", "I", "UP"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["server", "tests"]
+known-first-party = ["server", "tests", "tray_icon"]
 
 [tool.uv]
 # "Virtual" project: not an installable package, only scripts (server/, run.sh).

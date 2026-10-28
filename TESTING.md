@@ -51,6 +51,8 @@ New code comes with its test in the same commit.
 - **`test_gamepad.py`** - remap profile persistence.
 - **`test_guardian.py`** - anti-ban escape hatch (Linux and Windows).
 - **`test_i18n.py`** - every `tr("…")` in `server/` has a pt-BR line with the same placeholders.
+- **`test_tray_icon.py`** - the top bar icon without GTK: icons, the port/process checks, its texts
+  and pt-BR catalog, `--install`/`--remove` and one icon per app.
 - **`test_integration_ws.py`** - starts the aiohttp app and talks over the WebSockets the way the
   client does: keyframe gating, fan-out, `reset` on preset change, audio following (or not) the
   video preset, monitor switch, and the battery of malformed payloads that **must not** drop the
