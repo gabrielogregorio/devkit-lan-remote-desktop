@@ -270,9 +270,13 @@ async def api_monitors(request):
     hub: Hub = request.app["hub"]
     ahub: AudioHub = request.app["audio_hub"]
     s = hub.settings
+    # xrandr and `ffmpeg -sources` are blocking subprocesses (up to 5 s / 8 s when the X server
+    # does not answer): run them off the event loop so the video and input channels never freeze.
+    monitors = await asyncio.to_thread(video.get_monitors)
+    audio_ok = await asyncio.to_thread(audio.audio_available)
     return web.json_response({
         "encoder": video.ENCODER,
-        "monitors": video.get_monitors(),
+        "monitors": monitors,
         "current_monitor": hub.monitor_index,
         "presets": list(video.PRESETS.keys()),
         "current_preset": hub.preset_name,
@@ -281,7 +285,7 @@ async def api_monitors(request):
         "res_options": [360, 480, 540, 720, 900, 1080],
         "fps_options": [30, 45, 60, 90, 120],
         "bitrate_options": ["1200k", "2500k", "3500k", "7M", "12M", "25M"],
-        "audio_available": audio.audio_available(),
+        "audio_available": audio_ok,
         "audio_presets": list(audio.AUDIO_PRESETS.keys()),
         "current_audio_preset": ahub.preset_name,
         "audio_manual": ahub.manual,
