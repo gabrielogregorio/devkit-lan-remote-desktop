@@ -90,8 +90,11 @@ Built and tested on Ubuntu 24.04 (X11).
 
    The menu follows the system language (the screenshot is in Brazilian Portuguese: Ligado = On,
    Mostrar QR code = Show QR code). The address is the PC's local IP, so the QR code only works on
-   the same network. The QR code needs `sudo apt install python3-segno`; without it the window
-   shows only the address. `./tray_icon.py --remove` takes the icon out of the login.
+   the same network. Without `python3-segno` the QR window shows only the address.
+   `./tray_icon.py --remove` takes the icon out of the login.
+   The icon runs on the system python3 and needs `sudo apt install python3-gi gir1.2-gtk-3.0
+   gir1.2-ayatanaappindicator3-0.1` (already on a standard Ubuntu desktop) plus `python3-segno` for
+   the QR code.
 
    Menu: the status line ("LAN Remote Desktop (PC screen on the LAN): on air (port 8443)"),
    **On** (starts or stops the server), the address for the device, **Show QR code**, **Open in
@@ -106,6 +109,9 @@ Built and tested on Ubuntu 24.04 (X11).
 | `certs/cert.pem`, `certs/key.pem` | self-signed TLS pair with the LAN IPs, made by `./run.sh`; ignored by git (private key) |
 | `~/.config/devkit-lan-remote-desktop/gamepad-map.json` | saved gamepad remap profiles (`LRD_GAMEPAD_MAP` moves it) |
 | `/etc/udev/rules.d/99-lan-remote-desktop-uinput.rules` | `/dev/uinput` for the `input` group, from `./run.sh setup` |
+| `~/.config/autostart/devkit-lan-remote-desktop-tray.desktop` | starts the top bar icon at login, off (`./tray_icon.py --install`; `--remove` takes it out) |
+| `~/.local/share/applications/devkit-lan-remote-desktop-tray.desktop` | app menu shortcut for the icon (same command) |
+| `~/.cache/devkit-lan-remote-desktop/` | the icon's `server.log` ("View log"), on/off SVGs, the QR code PNG and its lock |
 
 Changed the network or the IP and the browser complains about the certificate? Move `certs/` to
 `trash/` and run `./run.sh` again: a new pair is made with the current IPs.
