@@ -1,8 +1,7 @@
-"""Fakes determinísticos para evitar uinput/ffmpeg/proc reais nos testes."""
-import asyncio
+"""Deterministic fakes so the tests never touch real uinput/ffmpeg/proc."""
 
 
-# ----------------------- subprocess assíncrono falso -----------------------
+# ----------------------- fake async subprocess -----------------------
 class FakeStream:
     def __init__(self, chunks=None, lines=None):
         self._chunks = list(chunks or [])
@@ -21,7 +20,7 @@ class FakeStream:
         try:
             return next(self._it)
         except StopIteration:
-            raise StopAsyncIteration
+            raise StopAsyncIteration from None
 
 
 class FakeProcess:
@@ -62,7 +61,7 @@ def make_create_subprocess(processes):
     return _fake
 
 
-# ----------------------------- UInput falso -----------------------------
+# ----------------------------- fake UInput -----------------------------
 class FakeUInput:
     instances = []
 
@@ -87,9 +86,9 @@ class FakeUInput:
         self.closed = True
 
 
-# ----------------------------- páginas Ogg -----------------------------
+# ----------------------------- Ogg pages -----------------------------
 def build_ogg_page(segments, header_type=0, serial=1, seqno=0):
-    """Monta UMA página Ogg válida. `segments`: lista de bytes completos."""
+    """Builds ONE valid Ogg page. `segments`: list of complete byte packets."""
     seg_table = bytearray()
     body = bytearray()
     for seg in segments:
@@ -114,7 +113,7 @@ def build_ogg_page(segments, header_type=0, serial=1, seqno=0):
 
 
 def build_ogg_page_raw(seg_table_bytes, body, header_type=0, serial=1, seqno=0):
-    """Monta página Ogg com seg_table explícita (permite lacing=255 no fim)."""
+    """Builds an Ogg page with an explicit seg_table (allows lacing=255 at the end)."""
     seg_table_bytes = bytearray(seg_table_bytes)
     page = bytearray()
     page += b"OggS"
@@ -129,10 +128,9 @@ def build_ogg_page_raw(seg_table_bytes, body, header_type=0, serial=1, seqno=0):
     return bytes(page)
 
 
-# ----------------------------- /proc falso (Linux) -----------------------------
+# ----------------------------- fake /proc (Linux) -----------------------------
 def fake_proc(monkeypatch, guardian, procs):
-    """Faz guardian._candidates_linux ler um /proc em memória."""
-    import os as _os
+    """Makes guardian._candidates_linux read an in-memory /proc."""
 
     monkeypatch.setattr(guardian.os, "listdir", lambda p: list(procs.keys()))
 
@@ -156,11 +154,13 @@ def fake_proc(monkeypatch, guardian, procs):
         rec = procs.get(pid, {})
         if name == "comm":
             v = rec.get("comm")
-            if v is None: raise OSError("no comm")
+            if v is None:
+                raise OSError("no comm")
             return FakeFile(v.encode())
         if name == "cmdline":
             cl = rec.get("cmdline")
-            if cl is None: raise OSError("no cmdline")
+            if cl is None:
+                raise OSError("no cmdline")
             return FakeFile(("\x00".join(cl) + "\x00").encode())
         raise OSError("unknown")
 

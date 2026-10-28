@@ -1,19 +1,18 @@
 import asyncio
-import pytest
 from unittest import mock
-from server import video
-from tests.helpers import FakeProcess, FakeStream, make_create_subprocess
 
+from server import video
+from tests.helpers import FakeProcess, make_create_subprocess
 
 # ───────────────────────── detect_encoder ─────────────────────────
 
-def test_detect_forcado(monkeypatch):
-    monkeypatch.setenv("RL_ENCODER", "vaapi")
+def test_detect_forced(monkeypatch):
+    monkeypatch.setenv("LRD_ENCODER", "vaapi")
     assert video.detect_encoder() == "vaapi"
 
 
-def test_detect_excecao(monkeypatch):
-    monkeypatch.delenv("RL_ENCODER", raising=False)
+def test_detect_exception(monkeypatch):
+    monkeypatch.delenv("LRD_ENCODER", raising=False)
 
     def raise_exc(*a, **kw):
         raise OSError("no ffmpeg")
@@ -25,7 +24,7 @@ def test_detect_excecao(monkeypatch):
 
 
 def test_detect_nvenc(monkeypatch):
-    monkeypatch.delenv("RL_ENCODER", raising=False)
+    monkeypatch.delenv("LRD_ENCODER", raising=False)
     fake = type("R", (), {"stdout": "h264_nvenc h264_vaapi"})()
     monkeypatch.setattr(video.subprocess, "run", lambda *a, **kw: fake)
     monkeypatch.setattr(video.shutil, "which", lambda x: "/usr/bin/nvidia-smi")
@@ -33,7 +32,7 @@ def test_detect_nvenc(monkeypatch):
 
 
 def test_detect_vaapi(monkeypatch):
-    monkeypatch.delenv("RL_ENCODER", raising=False)
+    monkeypatch.delenv("LRD_ENCODER", raising=False)
     fake = type("R", (), {"stdout": "h264_vaapi"})()
     monkeypatch.setattr(video.subprocess, "run", lambda *a, **kw: fake)
     monkeypatch.setattr(video.shutil, "which", lambda x: None)
@@ -42,7 +41,7 @@ def test_detect_vaapi(monkeypatch):
 
 
 def test_detect_x264(monkeypatch):
-    monkeypatch.delenv("RL_ENCODER", raising=False)
+    monkeypatch.delenv("LRD_ENCODER", raising=False)
     fake = type("R", (), {"stdout": ""})()
     monkeypatch.setattr(video.subprocess, "run", lambda *a, **kw: fake)
     monkeypatch.setattr(video.shutil, "which", lambda x: None)
@@ -53,40 +52,40 @@ def test_detect_x264(monkeypatch):
 # ───────────────────────── Preset.gop ─────────────────────────
 
 def test_preset_gop():
-    # GOP ~1s (ressync rapido p/ cliente novo sem tela preta longa)
+    # GOP ~1s (fast resync for a new client, no long black screen)
     assert video.PRESETS["high"].gop == 60
 
 
-def test_video_settings_gop_e_from_preset():
+def test_video_settings_gop_and_from_preset():
     vs = video.VideoSettings.from_preset(video.PRESETS["low"])
     assert (vs.max_h, vs.fps, vs.bitrate) == (540, 60, "3500k")
     assert vs.gop == 60
-    assert video.VideoSettings(max_h=720, fps=1, bitrate="7M").gop == 2  # piso 2
+    assert video.VideoSettings(max_h=720, fps=1, bitrate="7M").gop == 2  # floor of 2
 
 
 def test_kbps_parse():
     assert video._kbps("12M") == 12000
     assert video._kbps("3500k") == 3500
     assert video._kbps("8000") == 8  # bits -> kbps
-    assert video._kbps("lixo") == 8000  # fallback no ValueError
+    assert video._kbps("garbage") == 8000  # fallback on ValueError
 
 
 def test_lowlat_bufsize():
     assert video._lowlat_bufsize("12M") == "4000k"   # 12000/3
-    assert video._lowlat_bufsize("300k") == "500k"   # piso 500
+    assert video._lowlat_bufsize("300k") == "500k"   # floor of 500
 
 
 # ───────────────────────── _x_env ─────────────────────────
 
-def test_x_env_com_xauth(monkeypatch):
-    monkeypatch.setenv("RL_XAUTHORITY", "/tmp/xauth")
+def test_x_env_with_xauth(monkeypatch):
+    monkeypatch.setenv("LRD_XAUTHORITY", "/tmp/xauth")
     env = video._x_env()
     assert env["XAUTHORITY"] == "/tmp/xauth"
     assert "DISPLAY" in env
 
 
-def test_x_env_sem_xauth(monkeypatch):
-    monkeypatch.delenv("RL_XAUTHORITY", raising=False)
+def test_x_env_without_xauth(monkeypatch):
+    monkeypatch.delenv("LRD_XAUTHORITY", raising=False)
     env = video._x_env()
     assert "XAUTHORITY" not in env or env.get("XAUTHORITY") != "/tmp/xauth"
     assert "DISPLAY" in env
@@ -111,7 +110,7 @@ def test_get_monitors_parse(monkeypatch):
     assert mons[1]["x"] == 1920
 
 
-def test_get_monitors_excecao(monkeypatch):
+def test_get_monitors_exception(monkeypatch):
     monkeypatch.setattr(video.subprocess, "run",
                         lambda *a, **kw: (_ for _ in ()).throw(OSError()))
     assert video.get_monitors() == []
@@ -119,7 +118,7 @@ def test_get_monitors_excecao(monkeypatch):
 
 # ───────────────────────── virtual_screen ─────────────────────────
 
-def test_virtual_screen_com_mons(monkeypatch):
+def test_virtual_screen_with_monitors(monkeypatch):
     mons = [
         {"x": 0, "y": 0, "w": 1920, "h": 1080},
         {"x": 1920, "y": 0, "w": 1920, "h": 1080},
@@ -128,20 +127,20 @@ def test_virtual_screen_com_mons(monkeypatch):
     assert video.virtual_screen() == (3840, 1080)
 
 
-def test_virtual_screen_vazio(monkeypatch):
+def test_virtual_screen_empty(monkeypatch):
     monkeypatch.setattr(video, "get_monitors", lambda: [])
     assert video.virtual_screen() == (1920, 1080)
 
 
 # ───────────────────────── pick_region ─────────────────────────
 
-def test_pick_region_vazio(monkeypatch):
+def test_pick_region_empty(monkeypatch):
     monkeypatch.setattr(video, "get_monitors", lambda: [])
     r = video.pick_region(None)
     assert r["name"] == "screen"
 
 
-def test_pick_region_por_indice(monkeypatch):
+def test_pick_region_by_index(monkeypatch):
     mons = [
         {"index": 0, "name": "HDMI-0", "primary": True, "w": 1920, "h": 1080, "x": 0, "y": 0},
         {"index": 1, "name": "DP-1", "primary": False, "w": 1920, "h": 1080, "x": 1920, "y": 0},
@@ -151,7 +150,7 @@ def test_pick_region_por_indice(monkeypatch):
     assert r["name"] == "DP-1"
 
 
-def test_pick_region_indice_inexistente_cai_no_primario(monkeypatch):
+def test_pick_region_missing_index_falls_back_to_primary(monkeypatch):
     mons = [
         {"index": 0, "name": "HDMI-0", "primary": True, "w": 1920, "h": 1080, "x": 0, "y": 0},
     ]
@@ -160,7 +159,7 @@ def test_pick_region_indice_inexistente_cai_no_primario(monkeypatch):
     assert r["name"] == "HDMI-0"
 
 
-def test_pick_region_primario(monkeypatch):
+def test_pick_region_primary(monkeypatch):
     mons = [
         {"index": 0, "name": "HDMI-0", "primary": True, "w": 1920, "h": 1080, "x": 0, "y": 0},
         {"index": 1, "name": "DP-1", "primary": False, "w": 1920, "h": 1080, "x": 1920, "y": 0},
@@ -170,7 +169,7 @@ def test_pick_region_primario(monkeypatch):
     assert r["name"] == "HDMI-0"
 
 
-def test_pick_region_sem_primario(monkeypatch):
+def test_pick_region_without_primary(monkeypatch):
     mons = [
         {"index": 0, "name": "HDMI-0", "primary": False, "w": 1920, "h": 1080, "x": 0, "y": 0},
         {"index": 1, "name": "DP-1", "primary": False, "w": 1920, "h": 1080, "x": 1920, "y": 0},
@@ -192,13 +191,13 @@ def test_keyframe_sps():
     assert video._is_keyframe(au) is True
 
 
-def test_keyframe_nao():
+def test_keyframe_no():
     au = b"\x00\x00\x01\x41" + b"\xff" * 10
     assert video._is_keyframe(au) is False
 
 
-def test_keyframe_curto():
-    au = b"\x00\x00\x01"  # sem byte após o start code
+def test_keyframe_short():
+    au = b"\x00\x00\x01"  # no byte after the start code
     assert video._is_keyframe(au) is False
 
 
@@ -222,7 +221,7 @@ def test_build_nvenc_scale(monkeypatch):
     assert "scale" in cmd[scale_idx + 1]
 
 
-def test_build_nvenc_sem_scale(monkeypatch):
+def test_build_nvenc_without_scale(monkeypatch):
     monkeypatch.setattr(video, "ENCODER", "nvenc")
     enc = _make_enc()
     region = {"x": 0, "y": 0, "w": 1920, "h": 720, "name": "s"}
@@ -243,7 +242,7 @@ def test_build_vaapi_lowpower(monkeypatch):
     assert "scale_vaapi" in " ".join(cmd)
 
 
-def test_build_vaapi_sem_lowpower(monkeypatch):
+def test_build_vaapi_without_lowpower(monkeypatch):
     monkeypatch.setattr(video, "ENCODER", "vaapi")
     enc = _make_enc()
     enc._low_power = False
@@ -263,7 +262,7 @@ def test_build_x264_scale(monkeypatch):
     assert "-vf" in cmd
 
 
-def test_build_x264_sem_scale(monkeypatch):
+def test_build_x264_without_scale(monkeypatch):
     monkeypatch.setattr(video, "ENCODER", "x264")
     enc = _make_enc()
     region = {"x": 0, "y": 0, "w": 1920, "h": 720, "name": "s"}
@@ -274,7 +273,7 @@ def test_build_x264_sem_scale(monkeypatch):
 
 # ───────────────────────── ScreenEncoder._read_stream ─────────────────────────
 
-async def test_read_stream_fatia_aus():
+async def test_read_stream_splits_aus():
     AUD = b"\x00\x00\x01\x09"
     data = AUD + b"\x00\x00\x01\x05frame1" + AUD + b"\x00\x00\x01\x01frame2" + AUD
 
@@ -293,10 +292,10 @@ async def test_read_stream_fatia_aus():
     assert received[1][0] is False
 
 
-async def test_read_stream_au_incompleto():
+async def test_read_stream_incomplete_au():
     AUD = b"\x00\x00\x01\x09"
     # single AUD start but no second AUD to delimit the AU
-    data = AUD + b"\x00\x00\x01\x05parcial"
+    data = AUD + b"\x00\x00\x01\x05partial"
 
     received = []
 
@@ -315,28 +314,28 @@ async def test_read_stream_au_incompleto():
 
 async def test_drain_stderr(capsys):
     enc = _make_enc()
-    enc.proc = FakeProcess(stderr_lines=[b"erro x\n", b"  \n"])
+    enc.proc = FakeProcess(stderr_lines=[b"error x\n", b"  \n"])
     await enc._drain_stderr()
     out = capsys.readouterr().out
-    assert "erro x" in out
+    assert "error x" in out
 
 
-async def test_drain_stderr_sem_proc():
+async def test_drain_stderr_without_proc():
     enc = _make_enc()
     enc.proc = None
-    await enc._drain_stderr()  # não deve levantar
+    await enc._drain_stderr()  # must not raise
 
 
 # ───────────────────────── stop ─────────────────────────
 
-async def test_stop_sem_proc():
+async def test_stop_without_proc():
     enc = _make_enc()
     enc.proc = None
     enc._task = None
-    await enc.stop()  # não deve levantar
+    await enc.stop()  # must not raise
 
 
-async def test_stop_termina():
+async def test_stop_terminates():
     enc = _make_enc()
     proc = FakeProcess()
     proc.returncode = None
@@ -353,7 +352,7 @@ async def test_stop_termina():
     assert proc.terminated
 
 
-async def test_stop_terminate_falha_mata():
+async def test_stop_terminate_fails_kills():
     enc = _make_enc()
     proc = FakeProcess(terminate_raises=True)
     proc.returncode = None
@@ -365,7 +364,7 @@ async def test_stop_terminate_falha_mata():
 
 # ───────────────────────── _supervise ─────────────────────────
 
-async def test_supervise_x264_limite_tentativas(monkeypatch):
+async def test_supervise_x264_attempt_limit(monkeypatch):
     monkeypatch.setattr(video, "ENCODER", "x264")
     monkeypatch.setattr(video, "get_monitors", lambda: [])
 
@@ -411,7 +410,7 @@ async def test_supervise_vaapi_downgrade(monkeypatch):
     assert fake_cse.calls["n"] >= 6
 
 
-async def test_stop_terminate_e_kill_falham():
+async def test_stop_terminate_and_kill_fail():
     enc = _make_enc()
     proc = FakeProcess(terminate_raises=True)
     proc.returncode = None
@@ -422,10 +421,10 @@ async def test_stop_terminate_e_kill_falham():
     proc.kill = kill_raises
     enc.proc = proc
     enc._task = None
-    await enc.stop()  # except Exception: pass no inner try cobre 208-209
+    await enc.stop()  # the except Exception: pass in the inner try
 
 
-async def test_stop_task_levanta():
+async def test_stop_task_raises():
     enc = _make_enc()
     enc.proc = None
     enc._stop = False
@@ -434,9 +433,9 @@ async def test_stop_task_levanta():
         raise RuntimeError("task error")
 
     task = asyncio.create_task(bad_coro())
-    await asyncio.sleep(0)  # task completa com RuntimeError
+    await asyncio.sleep(0)  # the task finishes with RuntimeError
     enc._task = task
-    await enc.stop()  # except (CancelledError, Exception): pass cobre 214-215
+    await enc.stop()  # covers except (CancelledError, Exception): pass
 
 
 async def test_drain_stderr_exception():
@@ -449,19 +448,19 @@ async def test_drain_stderr_exception():
     proc_mock = mock.MagicMock()
     proc_mock.stderr = ErrorStream()
     enc.proc = proc_mock
-    await enc._drain_stderr()  # except Exception: pass cobre 251-252
+    await enc._drain_stderr()  # covers except Exception: pass
 
 
-async def test_read_stream_stop_imediato():
-    # _stop=True antes de entrar no loop → 258->exit
+async def test_read_stream_immediate_stop():
+    # _stop=True before entering the loop -> the while exits right away
     enc = _make_enc()
     enc.proc = FakeProcess(stdout_chunks=[b"data"])
     enc._stop = True
     await enc._read_stream()
 
 
-async def test_read_stream_sem_aud():
-    # i < 0: break (linha 266)
+async def test_read_stream_without_aud():
+    # i < 0: break
     received = []
 
     async def on_au(is_key, au):
@@ -474,8 +473,8 @@ async def test_read_stream_sem_aud():
     assert received == []
 
 
-async def test_read_stream_aud_nao_zero():
-    # j < 0 e i > 0: del buf[:i] (linha 270)
+async def test_read_stream_aud_not_at_zero():
+    # j < 0 and i > 0: del buf[:i]
     AUD = b"\x00\x00\x01\x09"
     received = []
 
@@ -483,16 +482,16 @@ async def test_read_stream_aud_nao_zero():
         received.append(au)
 
     enc = video.ScreenEncoder(on_au)
-    # AUD está no meio, sem segundo AUD → j<0, i>0 → del buf[:i]
+    # AUD in the middle, no second AUD -> j<0, i>0 -> del buf[:i]
     enc.proc = FakeProcess(stdout_chunks=[b"garbage" + AUD + b"payload"])
     enc._stop = False
     await enc._read_stream()
-    # sem AU completo (precisa de segundo AUD pra delimitar)
+    # no complete AU (it needs a second AUD to delimit it)
     assert received == []
 
 
-async def test_supervise_stop_durante_sleep(monkeypatch):
-    # _stop setado durante sleep → while condition False → 219->exit
+async def test_supervise_stop_during_sleep(monkeypatch):
+    # _stop set during the sleep -> while condition False -> exit
     monkeypatch.setattr(video, "ENCODER", "x264")
     monkeypatch.setattr(video, "get_monitors", lambda: [])
 
@@ -513,7 +512,7 @@ async def test_supervise_stop_durante_sleep(monkeypatch):
     assert enc._stop is True
 
 
-async def test_supervise_stop_no_meio(monkeypatch):
+async def test_supervise_stop_midway(monkeypatch):
     monkeypatch.setattr(video, "ENCODER", "x264")
     monkeypatch.setattr(video, "get_monitors", lambda: [])
 
@@ -529,8 +528,6 @@ async def test_supervise_stop_no_meio(monkeypatch):
     preset = video.PRESETS["high"]
     region = {"x": 0, "y": 0, "w": 1920, "h": 1080, "name": "s"}
 
-    call_count = [0]
-    original_build = enc._build_cmd
 
     async def stop_after_first():
         enc._stop = True

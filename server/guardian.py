@@ -1,54 +1,56 @@
 """
-guardian.py - escape hatch (kill switch) anti-banimento.
+guardian.py - anti-ban escape hatch (kill switch).
 
-POR QUE ISTO EXISTE
--------------------
-O remote-link injeta mouse, teclado e um **gamepad Xbox 360 virtual**
-(045e:028e) via /dev/uinput e captura a tela. Para um anticheat, isso é
-indistinguivel de cheat/automacao: um "jogador" sendo controlado de OUTRO PC,
-com entrada sintetica e um controle que nao existe fisicamente. Rodar essa
-ferramenta junto com um jogo online competitivo é caminho garantido para
-BANIMENTO da conta (as vezes ate do hardware/HWID).
+WHY THIS EXISTS
+---------------
+LAN Remote Desktop injects mouse, keyboard and a **virtual Xbox 360 gamepad**
+(045e:028e) through /dev/uinput and captures the screen. To an anti-cheat this
+is indistinguishable from a cheat/automation: a "player" being driven from
+ANOTHER PC, with synthetic input and a controller that does not physically
+exist. Running this tool next to a competitive online game is a sure way to get
+the account BANNED (sometimes even the hardware/HWID).
 
-O QUE ESTA GUARDA FAZ
----------------------
-  1. PRE-FLIGHT (na inicializacao): antes de carregar qualquer lib de controle
-     (evdev/uinput) ou de tela (ffmpeg), varre os processos. Se achar QUALQUER
-     anticheat ou jogo online da lista (ex.: Vanguard/vgc.exe ligado no boot do
-     Windows), a ferramenta NEM SOBE.
-  2. RUNTIME (enquanto roda): varre os processos a cada poucos segundos. Ao
-     detectar qualquer item da lista, DERRUBA o servidor na hora - solta o
-     uinput (some o gamepad virtual) e mata o ffmpeg (para a captura) antes de
-     sair.
-  3. AVISO NA TELA: nos dois casos mostra um aviso (dialogo grafico + banner no
-     terminal) dizendo QUAL programa/jogo disparou e POR QUE a ferramenta nao
-     pode rodar (controla mouse/tela/teclado/controle -> risco de ban).
+WHAT THIS GUARD DOES
+--------------------
+  1. PRE-FLIGHT (at startup): before loading any input (evdev/uinput) or screen
+     (ffmpeg) library, it scans the processes. If it finds ANY anti-cheat or
+     online game from the list (e.g. Vanguard/vgc.exe running from Windows
+     boot), the tool DOES NOT EVEN START.
+  2. RUNTIME (while running): scans the processes every few seconds. When it
+     detects any listed item, it TAKES THE SERVER DOWN right away - releases
+     uinput (the virtual gamepad disappears) and kills ffmpeg (stops the
+     capture) before exiting.
+  3. ON-SCREEN NOTICE: in both cases it shows a notice (graphical dialog +
+     terminal banner) saying WHICH program/game triggered it and WHY the tool
+     cannot run (it controls mouse/screen/keyboard/gamepad -> ban risk).
 
-É proposital ser conservador: NA DUVIDA, FECHA. Latencia de jogo casual nao vale
-perder a conta.
+Being conservative is on purpose: WHEN IN DOUBT, SHUT DOWN. Casual game latency
+is not worth losing the account.
 
-Sem dependencias extras: Linux le /proc, Windows usa `tasklist`, outros usam
-`ps`. Este modulo NAO importa evdev, aiohttp nem ffmpeg - pode ser chamado antes
-de tudo.
+No extra dependencies: Linux reads /proc, Windows uses `tasklist`, others use
+`ps`. This module does NOT import evdev, aiohttp or ffmpeg - it can be called
+before everything else.
 
-Para desligar (sob sua conta e risco):  RL_GUARDIAN=off ./remote-link.sh
+To turn it off (at your own risk):  LRD_GUARDIAN=off ./run.sh
 """
 
 import os
 import subprocess
 import sys
 
+from .i18n import tr
+
 # ---------------------------------------------------------------------------
-# LISTA NEGRA
+# BLOCKLIST
 #
-# Cada entrada: "Nome amigavel": [basenames de processo, em minusculo].
-# O match é por basename EXATO do executavel (case-insensitive), comparando
-# contra: o nome do processo, o alvo do /proc/PID/exe e o basename de CADA
-# token do cmdline (assim pegamos tambem jogos rodando via Proton/Wine, onde o
-# .exe aparece nos argumentos).
+# Each entry: "Friendly name": [process basenames, lowercase].
+# The match is by the EXACT basename of the executable (case-insensitive),
+# compared against: the process name, the /proc/PID/exe target and the basename
+# of EACH cmdline token (so games running through Proton/Wine, where the .exe
+# shows up in the arguments, are caught too).
 # ---------------------------------------------------------------------------
 
-# --- Anticheats (o sinal mais forte: se o driver/servico esta no ar, fecha) ---
+# --- Anti-cheats (the strongest signal: if the driver/service is up, shut down) ---
 ANTICHEATS = {
     "Riot Vanguard (Valorant/LoL)": [
         "vgc.exe", "vgtray.exe", "vgc", "vgk.sys", "vanguard.exe",
@@ -81,8 +83,8 @@ ANTICHEATS = {
     "Sabreshield / Sabre": ["sabresvc.sys"],
 }
 
-# --- Jogos online/multiplayer com ban por anticheat (principais do mundo) ---
-# Inclui .exe (Windows/Proton) e o nome nativo Linux quando existe.
+# --- Online/multiplayer games with anti-cheat bans (the world's main ones) ---
+# Includes the .exe (Windows/Proton) and the native Linux name when there is one.
 GAMES = {
     "Valorant": ["valorant.exe", "valorant-win64-shipping.exe"],
     "League of Legends": ["leagueclient.exe", "league of legends.exe", "leagueoflegends.exe"],
@@ -148,37 +150,37 @@ def _norm(name: str) -> str:
     return os.path.basename(name.strip().strip('"').strip("'")).lower()
 
 
-# Mapa basename -> nome amigavel; e o tipo (anticheat/jogo).
+# Map basename -> friendly name and kind (anticheat/game).
 _INDEX: dict[str, tuple[str, str]] = {}
 for _disp, _names in ANTICHEATS.items():
     for _n in _names:
         _INDEX[_norm(_n)] = (_disp, "anticheat")
 for _disp, _names in GAMES.items():
     for _n in _names:
-        _INDEX.setdefault(_norm(_n), (_disp, "jogo"))
+        _INDEX.setdefault(_norm(_n), (_disp, "game"))
 
 
 class Match:
-    """Um processo da lista negra encontrado."""
+    """A blocklisted process that was found."""
 
     def __init__(self, display: str, kind: str, hit: str, pid: str = "?"):
-        self.display = display   # nome amigavel ("Valorant")
-        self.kind = kind         # "anticheat" | "jogo"
-        self.hit = hit           # basename que casou ("valorant.exe")
+        self.display = display   # friendly name ("Valorant")
+        self.kind = kind         # "anticheat" | "game"
+        self.hit = hit           # basename that matched ("valorant.exe")
         self.pid = pid
 
     def reason(self) -> str:
         if self.kind == "anticheat":
-            return (f"Anticheat ativo: {self.display} (processo '{self.hit}', "
-                    f"PID {self.pid}).")
-        return (f"Jogo online detectado: {self.display} (processo '{self.hit}', "
-                f"PID {self.pid}).")
+            return tr("Anti-cheat running: {name} (process '{process}', PID {pid}).",
+                      name=self.display, process=self.hit, pid=self.pid)
+        return tr("Online game detected: {name} (process '{process}', PID {pid}).",
+                  name=self.display, process=self.hit, pid=self.pid)
 
 
-# ----------------------------- varredura -----------------------------
+# ----------------------------- scanning -----------------------------
 
 def _candidates_linux():
-    """Gera (pid, set_de_basenames) para cada processo via /proc."""
+    """Yields (pid, set_of_basenames) for each process through /proc."""
     try:
         pids = [d for d in os.listdir("/proc") if d.isdigit()]
     except OSError:
@@ -209,7 +211,7 @@ def _candidates_linux():
 
 
 def _candidates_windows():
-    """Gera (pid, set_de_basenames) via `tasklist`."""
+    """Yields (pid, set_of_basenames) through `tasklist`."""
     try:
         out = subprocess.run(
             ["tasklist", "/fo", "csv", "/nh"],
@@ -251,8 +253,8 @@ def _iter_processes():
 
 
 def scan() -> "Match | None":
-    """Retorna o PRIMEIRO match da lista negra, ou None se a maquina esta limpa.
-    Anticheats tem prioridade no relato (varredura unica, ordem por processo)."""
+    """Returns the FIRST blocklist match, or None when the machine is clean.
+    Anti-cheats take priority in the report (single pass, ordered by process)."""
     best = None
     for pid, names in _iter_processes():
         for n in names:
@@ -261,41 +263,45 @@ def scan() -> "Match | None":
                 disp, kind = found
                 m = Match(disp, kind, n, pid)
                 if kind == "anticheat":
-                    return m  # sinal mais forte: reporta na hora
+                    return m  # strongest signal: report right away
                 if best is None:
                     best = m
     return best
 
 
-# ----------------------------- aviso na tela -----------------------------
+# ----------------------------- on-screen notice -----------------------------
+
+def _risk_lines() -> tuple[str, str]:
+    return (tr("This tool controls the mouse, screen, keyboard and (virtual) gamepad."),
+            tr("To an anti-cheat this looks like a CHEAT/automation and can BAN your account."))
+
 
 def _banner(m: Match, phase: str) -> str:
-    head = ("INICIALIZACAO BLOQUEADA" if phase == "preflight"
-            else "ENCERRAMENTO DE EMERGENCIA")
+    head = tr("STARTUP BLOCKED") if phase == "preflight" else tr("EMERGENCY SHUTDOWN")
+    controls, risk = _risk_lines()
+    safety = tr("For safety it will NOT run while that is open.")
+    hint = tr("(close the game/anti-cheat and try again - or LRD_GUARDIAN=off at your own risk)")
     return (
         "\n"
         "\033[1;41;97m  ╔══════════════════════════════════════════════════════════╗  \033[0m\n"
-        f"\033[1;41;97m  ║  remote-link - {head:<41} ║  \033[0m\n"
+        f"\033[1;41;97m  ║  LAN Remote Desktop - {head:<34} ║  \033[0m\n"
         "\033[1;41;97m  ╚══════════════════════════════════════════════════════════╝  \033[0m\n"
         f"\033[1;31m  ✗ {m.reason()}\033[0m\n"
-        "\033[1;33m  Esta ferramenta controla mouse, tela, teclado e gamepad (virtual).\n"
-        "  Para um anticheat isso parece um CHEAT/automacao e pode BANIR sua conta.\n"
-        "  Por seguranca ela NAO vai rodar enquanto isso estiver aberto.\033[0m\n"
-        "\033[2m  (feche o jogo/anticheat e tente de novo - ou RL_GUARDIAN=off por sua conta e risco)\033[0m\n"
+        f"\033[1;33m  {controls}\n"
+        f"  {risk}\n"
+        f"  {safety}\033[0m\n"
+        f"\033[2m  {hint}\033[0m\n"
     )
 
 
 def _gui_notice(m: Match, phase: str):
-    """Tenta um dialogo grafico (best-effort, nunca derruba o processo)."""
-    title = "remote-link bloqueado - risco de banimento"
-    body = (
-        f"{m.reason()}\n\n"
-        "A ferramenta controla mouse, tela, teclado e gamepad virtual. "
-        "Para um anticheat isso parece cheat/automacao e pode BANIR sua conta, "
-        "por isso o remote-link "
-        + ("nao foi iniciado." if phase == "preflight" else "foi encerrado.")
-        + "\n\nFeche o jogo/anticheat e tente novamente."
-    )
+    """Tries a graphical dialog (best-effort, never takes the process down)."""
+    title = tr("LAN Remote Desktop blocked - ban risk")
+    outcome = (tr("That is why LAN Remote Desktop was not started.") if phase == "preflight"
+               else tr("That is why LAN Remote Desktop was shut down."))
+    controls, risk = _risk_lines()
+    retry = tr("Close the game/anti-cheat and try again.")
+    body = f"{m.reason()}\n\n{controls} {risk} {outcome}\n\n{retry}"
     try:
         if sys.platform.startswith("win"):
             import ctypes  # 0x10 = MB_ICONERROR | MB_SYSTEMMODAL(0x1000)
@@ -303,9 +309,9 @@ def _gui_notice(m: Match, phase: str):
             return
     except Exception:
         pass
-    # Linux/macOS: tenta zenity -> kdialog -> notify-send -> xmessage
+    # Linux/macOS: tries zenity -> kdialog -> notify-send -> xmessage
     env = dict(os.environ)
-    env.setdefault("DISPLAY", os.environ.get("RL_DISPLAY", ":0"))
+    env.setdefault("DISPLAY", os.environ.get("LRD_DISPLAY", ":0"))
     for cmd in (
         ["zenity", "--error", "--width=460", "--title", title, "--text", body],
         ["kdialog", "--error", body, "--title", title],
@@ -321,26 +327,26 @@ def _gui_notice(m: Match, phase: str):
 
 
 def show_block_notice(m: Match, phase: str):
-    """Aviso completo: banner no terminal + dialogo na tela."""
+    """Full notice: terminal banner + on-screen dialog."""
     sys.stderr.write(_banner(m, phase))
     sys.stderr.flush()
     _gui_notice(m, phase)
 
 
-# ----------------------------- API publica -----------------------------
+# ----------------------------- public API -----------------------------
 
 def disabled() -> bool:
-    return os.environ.get("RL_GUARDIAN", "on").strip().lower() in (
-        "off", "0", "false", "no", "nao", "disable", "disabled")
+    return os.environ.get("LRD_GUARDIAN", "on").strip().lower() in (
+        "off", "0", "false", "no", "disable", "disabled")
 
 
 def enforce_preflight():
-    """Chamado ANTES de carregar libs de controle. Se a maquina nao estiver
-    limpa, mostra o aviso e ABORTA o processo (sys.exit(3))."""
+    """Called BEFORE loading the input libraries. If the machine is not clean,
+    shows the notice and ABORTS the process (sys.exit(3))."""
     if disabled():
         sys.stderr.write(
-            "\033[1;33m! guardian DESATIVADO (RL_GUARDIAN=off) - sem protecao "
-            "anti-ban.\033[0m\n")
+            "\033[1;33m! guardian DISABLED (LRD_GUARDIAN=off) - no anti-ban "
+            "protection.\033[0m\n")
         return
     m = scan()
     if m:
@@ -349,14 +355,15 @@ def enforce_preflight():
 
 
 async def monitor(on_trip, interval: float | None = None):
-    """Loop assincrono. A cada `interval`s varre os processos; ao achar um item
-    da lista, mostra o aviso e chama `on_trip(match)` (coro) para derrubar tudo.
-    Intervalo padrao 2s; ajustavel via RL_GUARDIAN_INTERVAL (segundos)."""
+    """Async loop. Every `interval` seconds it scans the processes; when it finds
+    a listed item it shows the notice and calls `on_trip(match)` (a coroutine)
+    to take everything down. Default interval 2s; tunable with
+    LRD_GUARDIAN_INTERVAL (seconds)."""
     if disabled():
         return
     if interval is None:
         try:
-            interval = max(0.5, float(os.environ.get("RL_GUARDIAN_INTERVAL", "2.0")))
+            interval = max(0.5, float(os.environ.get("LRD_GUARDIAN_INTERVAL", "2.0")))
         except ValueError:
             interval = 2.0
     import asyncio
@@ -374,16 +381,16 @@ async def monitor(on_trip, interval: float | None = None):
 
 def _main(argv):
     if "--list" in argv:
-        print("# Anticheats:")
+        print("# Anti-cheats:")
         for d in ANTICHEATS:
             print(f"  - {d}")
-        print("# Jogos:")
+        print("# Games:")
         for d in GAMES:
             print(f"  - {d}")
         return 0
-    # default / --check : pre-flight para o remote-link.sh
+    # default / --check: pre-flight for run.sh
     if disabled():
-        sys.stderr.write("! guardian off (RL_GUARDIAN)\n")
+        sys.stderr.write("! guardian off (LRD_GUARDIAN)\n")
         return 0
     m = scan()
     if m:

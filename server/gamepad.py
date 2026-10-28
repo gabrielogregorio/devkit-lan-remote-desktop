@@ -1,37 +1,38 @@
 """
-Persistencia do perfil de REMAPEAMENTO de gamepad.
+Persistence of the gamepad REMAPPING profile.
 
-O cliente faz a traducao (ele tem o objeto Gamepad ao vivo) e envia ja no
-formato padrao Xbox. Aqui so guardamos/servimos o JSON do perfil, por ID do
-controle (gamepad.id), pra valer em qualquer device que acesse este host -
-util pros controles "pirata" de PS2/USB que reportam mapping nao-standard com
-botoes/eixos em indices arbitrarios.
+The client does the translation (it has the live Gamepad object) and already
+sends the standard Xbox layout. Here we only store/serve the profile JSON, per
+controller ID (gamepad.id), so it applies on any device that reaches this host -
+useful for the knock-off PS2/USB controllers that report a non-standard mapping
+with buttons/axes at arbitrary indices.
 
-Formato do arquivo (RL_GAMEPAD_MAP ou ~/.config/remote-link/gamepad-map.json):
+File format (LRD_GAMEPAD_MAP or $XDG_CONFIG_HOME/devkit-lan-remote-desktop/gamepad-map.json,
+with ~/.config when XDG_CONFIG_HOME is unset):
 
     { "<gamepad.id>": { "buttons": {"a": 1, "b": 2, ...},
                         "axes": {"lx": 0, "ly": 1, ...},
                         "triggers": {"lt": {"src":"axis","i":4}, ...} } }
 
-A semantica de cada chave e definida pelo cliente (web/app.js). O servidor
-trata o valor como um blob opaco e so valida que e um dict JSON.
+The meaning of each key is defined by the client (web/app.js). The server
+treats the value as an opaque blob and only checks that it is a JSON dict.
 """
 import json
 import os
 
 
 def _map_path() -> str:
-    forced = os.environ.get("RL_GAMEPAD_MAP")
+    forced = os.environ.get("LRD_GAMEPAD_MAP")
     if forced:
         return forced
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return os.path.join(base, "remote-link", "gamepad-map.json")
+    return os.path.join(base, "devkit-lan-remote-desktop", "gamepad-map.json")
 
 
 def load_maps() -> dict:
-    """Le todos os perfis salvos. Nunca levanta: arquivo ausente/corrompido -> {}."""
+    """Reads every saved profile. Never raises: missing/corrupted file -> {}."""
     try:
-        with open(_map_path(), "r", encoding="utf-8") as f:
+        with open(_map_path(), encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, ValueError):
         return {}
@@ -39,18 +40,18 @@ def load_maps() -> dict:
 
 
 def save_map(pad_id: str, mapping: dict) -> None:
-    """Salva/atualiza o perfil de um controle (por gamepad.id) e persiste."""
+    """Saves/updates a controller profile (by gamepad.id) and persists it."""
     if not pad_id or not isinstance(mapping, dict):
-        raise ValueError("pad_id e mapping (dict) obrigatorios")
+        raise ValueError("pad_id and mapping (dict) are required")
     maps = load_maps()
     maps[str(pad_id)] = mapping
     _write(maps)
 
 
 def delete_map(pad_id: str) -> bool:
-    """Remove o perfil de um controle. Retorna True se existia."""
+    """Removes a controller profile. Returns True if it existed."""
     if not pad_id:
-        raise ValueError("pad_id obrigatorio")
+        raise ValueError("pad_id is required")
     maps = load_maps()
     if str(pad_id) not in maps:
         return False

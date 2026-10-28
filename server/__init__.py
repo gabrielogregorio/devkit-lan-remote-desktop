@@ -1,1 +1,1 @@
-"""remote-link - browser-based low-latency screen share + remote control."""
+"""LAN Remote Desktop - browser-based low-latency screen share + remote control."""

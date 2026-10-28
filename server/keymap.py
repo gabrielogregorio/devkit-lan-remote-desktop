@@ -1,4 +1,4 @@
-"""Mapa KeyboardEvent.code (navegador) -> codigo de tecla evdev."""
+"""Map KeyboardEvent.code (browser) -> evdev key code."""
 from evdev import ecodes as e
 
 KEYMAP = {

@@ -1,15 +1,21 @@
 """
-Injecao de input no Ubuntu via /dev/uinput (evdev):
+Input injection on Ubuntu through /dev/uinput (evdev):
 
-  - pointer  : mouse absoluto (ABS_X/Y no espaco da tela toda) + botoes + scroll
-  - keyboard : teclado completo
-  - gamepad  : Xbox 360 virtual (VID 045e:028e) -> jogos/Steam detectam como real
+  - pointer  : absolute mouse (ABS_X/Y over the whole screen space) + buttons + scroll
+  - keyboard : full keyboard
+  - gamepad  : virtual Xbox 360 (VID 045e:028e) -> games/Steam detect it as real
 
-O cliente manda coordenadas normalizadas (0..1) dentro da regiao capturada;
-aqui convertemos para o bounding-box X e escrevemos ABS absoluto.
+The client sends normalized coordinates (0..1) inside the captured region;
+here we convert them to the X bounding box and write absolute ABS.
+
+NullInjector is the same interface doing nothing: view-only mode (LRD_INPUT=off,
+e.g. the e2e suite, where garbage sent to /ws/input must not move the developer's
+mouse) and the fallback when /dev/uinput cannot be opened (no permission, CI
+runners without the device), so the screen can still be watched.
 """
 
-from evdev import UInput, AbsInfo, ecodes as e
+from evdev import AbsInfo, UInput, UInputError  # noqa: F401 - UInputError is re-exported for main
+from evdev import ecodes as e
 
 from .keymap import KEYMAP
 
@@ -30,7 +36,7 @@ def _i16(v: float) -> int:
 
 
 def _axis(v) -> float:
-    """Eixo -1..1 seguro. NaN/inf/tipo errado viram 0 (centro)."""
+    """Safe -1..1 axis. NaN/inf/wrong type become 0 (center)."""
     try:
         f = float(v)
     except (TypeError, ValueError):
@@ -41,7 +47,7 @@ def _axis(v) -> float:
 
 
 def _unit(v) -> float:
-    """Gatilho 0..1 seguro. NaN/inf/tipo errado viram 0 (solto)."""
+    """Safe 0..1 trigger. NaN/inf/wrong type become 0 (released)."""
     try:
         f = float(v)
     except (TypeError, ValueError):
@@ -60,11 +66,11 @@ class Injector:
                 (e.ABS_Y, AbsInfo(0, 0, ABS_MAX, 0, 0, 0)),
             ],
             e.EV_REL: [e.REL_WHEEL, e.REL_HWHEEL],
-        }, name="remote-link-pointer", vendor=0x1d6b, product=0x0101, version=1)
+        }, name="lan-remote-desktop-pointer", vendor=0x1d6b, product=0x0101, version=1)
 
         self.keyboard = UInput(
             {e.EV_KEY: list(range(1, 249))},
-            name="remote-link-keyboard", vendor=0x1d6b, product=0x0102, version=1,
+            name="lan-remote-desktop-keyboard", vendor=0x1d6b, product=0x0102, version=1,
         )
 
         self.gamepad = UInput({
@@ -122,7 +128,7 @@ class Injector:
             self.pointer.write(e.EV_REL, e.REL_HWHEEL, 1 if dx > 0 else -1)
         self.pointer.syn()
 
-    # ---------- teclado ----------
+    # ---------- keyboard ----------
     def key(self, code: str, down: bool):
         kc = KEYMAP.get(code)
         if kc is None:
@@ -132,10 +138,10 @@ class Injector:
 
     # ---------- gamepad ----------
     def gamepad_state(self, axes: list, buttons: list, lt=None, rt=None):
-        # Um frame torto (tipo errado, NaN, campo faltando) nao pode escrever
-        # metade do estado e abortar no meio: o resto sairia junto com o proximo
-        # syn e o jogo veria botao/gatilho "preso". Entao tudo aqui e total -
-        # o que nao da pra interpretar vira neutro (solto/centro).
+        # A malformed frame (wrong type, NaN, missing field) must not write half
+        # of the state and abort midway: the rest would go out with the next syn
+        # and the game would see a "stuck" button/trigger. So everything here is
+        # total - whatever cannot be interpreted becomes neutral (released/center).
         gp = self.gamepad
         if not isinstance(axes, (list, tuple)):
             axes = []
@@ -155,14 +161,14 @@ class Injector:
             b = buttons[i] if i < len(buttons) else None
             return 1 if (isinstance(b, dict) and b.get("p")) else 0
 
-        # Gatilhos: o cliente manda lt/rt explicitos (0..1) quando consegue
-        # detectar (mapping nao-padrao usa eixos). Cai pros buttons[6]/[7]
-        # so se o cliente nao mandou nada.
+        # Triggers: the client sends explicit lt/rt (0..1) when it can detect
+        # them (a non-standard mapping uses axes). Falls back to buttons[6]/[7]
+        # only when the client sent nothing.
         lz = _unit(lt if lt is not None else bval(6))
         rz = _unit(rt if rt is not None else bval(7))
-        # round (nao int): replica o valor 0..1 -> 0..255 linear sem enviesar
-        # pra baixo. evdev deduplica valores iguais, entao reescrever o mesmo
-        # ABS nao gera evento -> sem flicker.
+        # round (not int): maps 0..1 -> 0..255 linearly without biasing it
+        # downwards. evdev deduplicates equal values, so rewriting the same ABS
+        # produces no event -> no flicker.
         gp.write(e.EV_ABS, e.ABS_Z,  max(0, min(255, round(lz * 255))))
         gp.write(e.EV_ABS, e.ABS_RZ, max(0, min(255, round(rz * 255))))
         gp.write(e.EV_ABS, e.ABS_HAT0Y, bpr(13) - bpr(12))
@@ -198,3 +204,16 @@ class Injector:
                 dev.close()
             except Exception:
                 pass
+
+
+class NullInjector:
+    """Same interface as Injector, does nothing: no uinput device is created."""
+
+    def set_geometry(self, total: tuple[int, int], region: dict):
+        pass
+
+    def handle(self, msg: dict):
+        pass
+
+    def close(self):
+        pass

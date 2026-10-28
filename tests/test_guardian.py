@@ -1,14 +1,22 @@
 import asyncio
 import ctypes
 import types
-import pytest
 from unittest import mock
 
-from server import guardian
+import pytest
+
+from server import guardian, i18n
 from tests.helpers import fake_proc
 
 
-# ───────────────────────── _norm / índice ─────────────────────────
+@pytest.fixture(autouse=True)
+def _english(monkeypatch):
+    # The notice text follows the desktop language; pin English so the
+    # assertions below do not depend on the developer's LANG.
+    monkeypatch.setattr(i18n, "LANG", "en")
+
+
+# ───────────────────────── _norm / index ─────────────────────────
 
 def test_norm():
     assert guardian._norm("/A/B/Vgc.EXE") == "vgc.exe"
@@ -20,14 +28,20 @@ def test_norm():
 def test_match_reason_anticheat():
     m = guardian.Match("X", "anticheat", "vgc.exe", "42")
     r = m.reason()
-    assert "Anticheat" in r
+    assert "Anti-cheat" in r
     assert "vgc.exe" in r
 
 
-def test_match_reason_jogo():
-    m = guardian.Match("CS", "jogo", "cs2", "99")
+def test_match_reason_anticheat_pt_br(monkeypatch):
+    monkeypatch.setattr(i18n, "LANG", "pt-BR")
+    r = guardian.Match("X", "anticheat", "vgc.exe", "42").reason()
+    assert r == "Anticheat ativo: X (processo 'vgc.exe', PID 42)."
+
+
+def test_match_reason_game():
+    m = guardian.Match("CS", "game", "cs2", "99")
     r = m.reason()
-    assert "Jogo online" in r
+    assert "Online game" in r
     assert "cs2" in r
 
 
@@ -47,7 +61,7 @@ def test_candidates_linux_ok(monkeypatch):
     assert "python3" in names
 
 
-def test_candidates_linux_oserror_por_arquivo(monkeypatch):
+def test_candidates_linux_oserror_per_file(monkeypatch):
     procs = {
         "1": {"comm": None, "exe": "/bin/bash", "cmdline": ["bash"]},
         "2": {"comm": "python3", "exe": None, "cmdline": ["python3"]},
@@ -58,7 +72,7 @@ def test_candidates_linux_oserror_por_arquivo(monkeypatch):
     assert len(result) == 3
 
 
-def test_candidates_linux_listdir_falha(monkeypatch):
+def test_candidates_linux_listdir_fails(monkeypatch):
     def raise_oserror(p):
         raise OSError("no proc")
     monkeypatch.setattr(guardian.os, "listdir", raise_oserror)
@@ -66,7 +80,7 @@ def test_candidates_linux_listdir_falha(monkeypatch):
     assert result == []
 
 
-def test_candidates_linux_filtra_nao_numerico(monkeypatch):
+def test_candidates_linux_skips_non_numeric(monkeypatch):
     procs = {
         "self": {},
         "net": {},
@@ -91,7 +105,7 @@ def test_candidates_windows_ok(monkeypatch):
     assert "vgc.exe" in names
 
 
-def test_candidates_windows_erro(monkeypatch):
+def test_candidates_windows_error(monkeypatch):
     monkeypatch.setattr(guardian.subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError()))
     result = list(guardian._candidates_windows())
     assert result == []
@@ -110,7 +124,7 @@ def test_candidates_generic_ok(monkeypatch):
     assert "cs2" in names
 
 
-def test_candidates_generic_erro(monkeypatch):
+def test_candidates_generic_error(monkeypatch):
     monkeypatch.setattr(guardian.subprocess, "run", lambda *a, **kw: (_ for _ in ()).throw(OSError()))
     result = list(guardian._candidates_generic())
     assert result == []
@@ -141,10 +155,10 @@ def test_iter_darwin(monkeypatch):
 
 # ───────────────────────── scan ─────────────────────────
 
-def test_scan_anticheat_prioridade(monkeypatch):
-    # Ambos anticheat e jogo presentes; anticheat deve vencer
+def test_scan_anticheat_priority(monkeypatch):
+    # Both an anti-cheat and a game are present; the anti-cheat must win
     def fake_iter():
-        yield "1", {"cs2"}        # jogo
+        yield "1", {"cs2"}        # game
         yield "2", {"vgc.exe"}    # anticheat
     monkeypatch.setattr(guardian, "_iter_processes", fake_iter)
     m = guardian.scan()
@@ -153,16 +167,16 @@ def test_scan_anticheat_prioridade(monkeypatch):
     assert m.hit == "vgc.exe"
 
 
-def test_scan_so_jogo(monkeypatch):
+def test_scan_game_only(monkeypatch):
     def fake_iter():
         yield "1", {"cs2"}
     monkeypatch.setattr(guardian, "_iter_processes", fake_iter)
     m = guardian.scan()
     assert m is not None
-    assert m.kind == "jogo"
+    assert m.kind == "game"
 
 
-def test_scan_limpo(monkeypatch):
+def test_scan_clean(monkeypatch):
     def fake_iter():
         yield "1", {"notepad.exe"}
     monkeypatch.setattr(guardian, "_iter_processes", fake_iter)
@@ -170,7 +184,7 @@ def test_scan_limpo(monkeypatch):
 
 
 def test_scan_match_real_basename(monkeypatch):
-    # rustc/cargo NÃO devem casar com o jogo Rust
+    # rustc/cargo must NOT match the game Rust
     def fake_iter():
         yield "1", {"rustc", "cargo"}
     monkeypatch.setattr(guardian, "_iter_processes", fake_iter)
@@ -182,13 +196,14 @@ def test_scan_match_real_basename(monkeypatch):
 def test_banner_preflight():
     m = guardian.Match("X", "anticheat", "vgc.exe", "1")
     b = guardian._banner(m, "preflight")
-    assert "INICIALIZACAO BLOQUEADA" in b
+    assert "STARTUP BLOCKED" in b
+    assert "LAN Remote Desktop" in b
 
 
 def test_banner_runtime():
     m = guardian.Match("X", "anticheat", "vgc.exe", "1")
     b = guardian._banner(m, "runtime")
-    assert "ENCERRAMENTO DE EMERGENCIA" in b
+    assert "EMERGENCY SHUTDOWN" in b
 
 
 # ───────────────────────── _gui_notice ─────────────────────────
@@ -197,7 +212,7 @@ class DummyPopen:
     pass
 
 
-def test_gui_linux_primeiro_falha_segundo_ok(monkeypatch):
+def test_gui_linux_first_fails_second_ok(monkeypatch):
     monkeypatch.setattr(guardian.sys, "platform", "linux")
     call_count = [0]
 
@@ -219,10 +234,10 @@ def test_gui_windows(monkeypatch):
         MessageBoxW=lambda *a: 0))
     monkeypatch.setattr(ctypes, "windll", fake, raising=False)
     m = guardian.Match("V", "anticheat", "vgc.exe", "1")
-    guardian._gui_notice(m, "preflight")  # não deve levantar
+    guardian._gui_notice(m, "preflight")  # must not raise
 
 
-def test_gui_windows_excecao_cai_no_loop(monkeypatch):
+def test_gui_windows_exception_falls_back_to_loop(monkeypatch):
     monkeypatch.setattr(guardian.sys, "platform", "win32")
 
     def raise_msgbox(*a):
@@ -252,33 +267,34 @@ def test_show_block_notice(monkeypatch, capfd):
     m = guardian.Match("X", "anticheat", "vgc.exe", "1")
     guardian.show_block_notice(m, "preflight")
     _, err = capfd.readouterr()
-    assert "INICIALIZACAO" in err or "remote-link" in err
+    assert "STARTUP BLOCKED" in err
     assert len(gui_calls) == 1
 
 
 # ───────────────────────── disabled ─────────────────────────
 
 @pytest.mark.parametrize("val,expected", [
-    ("off", True), ("0", True), ("false", True), ("nao", True),
+    ("off", True), ("0", True), ("false", True), ("no", True),
+    ("disable", True), ("disabled", True), ("nao", False),
     ("on", False), ("", False),
 ])
-def test_disabled_parametrizado(monkeypatch, val, expected):
-    monkeypatch.setenv("RL_GUARDIAN", val)
+def test_disabled_parametrized(monkeypatch, val, expected):
+    monkeypatch.setenv("LRD_GUARDIAN", val)
     assert guardian.disabled() == expected
 
 
 # ───────────────────────── enforce_preflight ─────────────────────────
 
-def test_preflight_desativado(monkeypatch, capfd):
-    monkeypatch.setenv("RL_GUARDIAN", "off")
+def test_preflight_disabled(monkeypatch, capfd):
+    monkeypatch.setenv("LRD_GUARDIAN", "off")
     result = guardian.enforce_preflight()
     assert result is None
     _, err = capfd.readouterr()
-    assert "guardian" in err.lower() or "DESATIVADO" in err or "guardian" in err
+    assert "guardian DISABLED (LRD_GUARDIAN=off)" in err
 
 
-def test_preflight_bloqueado(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+def test_preflight_blocked(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
     m = guardian.Match("V", "anticheat", "vgc.exe", "1")
     monkeypatch.setattr(guardian, "scan", lambda: m)
     block_calls = []
@@ -290,8 +306,8 @@ def test_preflight_bloqueado(monkeypatch):
     assert len(block_calls) == 1
 
 
-def test_preflight_limpo(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+def test_preflight_clean(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
     monkeypatch.setattr(guardian, "scan", lambda: None)
     result = guardian.enforce_preflight()
     assert result is None
@@ -299,8 +315,8 @@ def test_preflight_limpo(monkeypatch):
 
 # ───────────────────────── monitor ─────────────────────────
 
-async def test_monitor_desativado(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "off")
+async def test_monitor_disabled(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "off")
     scan_calls = []
     monkeypatch.setattr(guardian, "scan", lambda: scan_calls.append(1) or None)
 
@@ -311,10 +327,10 @@ async def test_monitor_desativado(monkeypatch):
     assert len(scan_calls) == 0
 
 
-async def test_monitor_trip_apos_limpo(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+async def test_monitor_trip_after_clean(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
 
-    results = iter([None, guardian.Match("Y", "jogo", "cs2", "9")])
+    results = iter([None, guardian.Match("Y", "game", "cs2", "9")])
     monkeypatch.setattr(guardian, "scan", lambda: next(results))
 
     block_calls = []
@@ -342,11 +358,11 @@ async def test_monitor_trip_apos_limpo(monkeypatch):
     assert trip_calls[0].hit == "cs2"
 
 
-async def test_monitor_intervalo_env_valido(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
-    monkeypatch.setenv("RL_GUARDIAN_INTERVAL", "0.5")
+async def test_monitor_interval_env_valid(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
+    monkeypatch.setenv("LRD_GUARDIAN_INTERVAL", "0.5")
 
-    results = iter([None, guardian.Match("Y", "jogo", "cs2", "9")])
+    results = iter([None, guardian.Match("Y", "game", "cs2", "9")])
     monkeypatch.setattr(guardian, "scan", lambda: next(results))
     monkeypatch.setattr(guardian, "show_block_notice", lambda *a: None)
 
@@ -365,11 +381,11 @@ async def test_monitor_intervalo_env_valido(monkeypatch):
     assert sleeps[0] == 0.5
 
 
-async def test_monitor_intervalo_env_invalido(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
-    monkeypatch.setenv("RL_GUARDIAN_INTERVAL", "abc")
+async def test_monitor_interval_env_invalid(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
+    monkeypatch.setenv("LRD_GUARDIAN_INTERVAL", "abc")
 
-    results = iter([None, guardian.Match("Y", "jogo", "cs2", "9")])
+    results = iter([None, guardian.Match("Y", "game", "cs2", "9")])
     monkeypatch.setattr(guardian, "scan", lambda: next(results))
     monkeypatch.setattr(guardian, "show_block_notice", lambda *a: None)
 
@@ -388,10 +404,10 @@ async def test_monitor_intervalo_env_invalido(monkeypatch):
     assert sleeps[0] == 2.0
 
 
-# ───────────────────────── branches extras ─────────────────────────
+# ───────────────────────── extra branches ─────────────────────────
 
-def test_candidates_linux_nomes_vazios(monkeypatch):
-    # pid com comm=" " (→ "") + exe/cmdline falhando → names vazio → não yield
+def test_candidates_linux_empty_names(monkeypatch):
+    # pid with comm=" " (→ "") + exe/cmdline failing → empty names → no yield
     procs = {
         "111": {"comm": " ", "exe": None, "cmdline": None},
         "222": {"comm": "ok_proc", "exe": "/bin/ok", "cmdline": ["ok"]},
@@ -399,11 +415,11 @@ def test_candidates_linux_nomes_vazios(monkeypatch):
     fake_proc(monkeypatch, guardian, procs)
     result = list(guardian._candidates_linux())
     pids = [r[0] for r in result]
-    assert "111" not in pids  # nomes vazios → não é gerado
+    assert "111" not in pids  # empty names → not yielded
     assert "222" in pids
 
 
-def test_candidates_windows_csv_vazio(monkeypatch):
+def test_candidates_windows_empty_csv(monkeypatch):
     fake = mock.Mock()
     fake.stdout = ""
     monkeypatch.setattr(guardian.subprocess, "run", lambda *a, **kw: fake)
@@ -411,8 +427,8 @@ def test_candidates_windows_csv_vazio(monkeypatch):
     assert result == []
 
 
-def test_candidates_windows_csv_linha_curta(monkeypatch):
-    # len(row) < 2: branch 223->222 (volta ao for sem yield)
+def test_candidates_windows_short_csv_row(monkeypatch):
+    # len(row) < 2: the branch that goes back to the for without yielding
     fake = mock.Mock()
     fake.stdout = '"onecol"\r\n'
     monkeypatch.setattr(guardian.subprocess, "run", lambda *a, **kw: fake)
@@ -420,7 +436,7 @@ def test_candidates_windows_csv_linha_curta(monkeypatch):
     assert result == []
 
 
-def test_scan_dois_jogos_mantem_primeiro(monkeypatch):
+def test_scan_two_games_keeps_first(monkeypatch):
     def fake_iter():
         yield "1", {"cs2"}
         yield "2", {"dota2"}
@@ -430,17 +446,17 @@ def test_scan_dois_jogos_mantem_primeiro(monkeypatch):
     assert m.hit == "cs2"
 
 
-def test_gui_linux_todos_falham(monkeypatch):
+def test_gui_linux_all_fail(monkeypatch):
     monkeypatch.setattr(guardian.sys, "platform", "linux")
     monkeypatch.setattr(guardian.subprocess, "Popen",
                         lambda *a, **kw: (_ for _ in ()).throw(OSError("all fail")))
     m = guardian.Match("V", "anticheat", "vgc.exe", "1")
-    guardian._gui_notice(m, "preflight")  # loop esgota sem return
+    guardian._gui_notice(m, "preflight")  # the loop runs out without returning
 
 
-async def test_monitor_interval_explicito(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
-    results = iter([None, guardian.Match("Y", "jogo", "cs2", "9")])
+async def test_monitor_explicit_interval(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
+    results = iter([None, guardian.Match("Y", "game", "cs2", "9")])
     monkeypatch.setattr(guardian, "scan", lambda: next(results))
     monkeypatch.setattr(guardian, "show_block_notice", lambda *a: None)
 
@@ -464,18 +480,18 @@ def test_main_list(capsys):
     result = guardian._main(["--list"])
     assert result == 0
     out = capsys.readouterr().out
-    assert "Anticheats:" in out
-    assert "Jogos:" in out
+    assert "# Anti-cheats:" in out
+    assert "# Games:" in out
 
 
-def test_main_desativado(monkeypatch, capfd):
-    monkeypatch.setenv("RL_GUARDIAN", "off")
+def test_main_disabled(monkeypatch, capfd):
+    monkeypatch.setenv("LRD_GUARDIAN", "off")
     result = guardian._main([])
     assert result == 0
 
 
-def test_main_bloqueado(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+def test_main_blocked(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
     m = guardian.Match("V", "anticheat", "vgc.exe", "1")
     monkeypatch.setattr(guardian, "scan", lambda: m)
     monkeypatch.setattr(guardian, "show_block_notice", lambda *a: None)
@@ -483,8 +499,20 @@ def test_main_bloqueado(monkeypatch):
     assert result == 3
 
 
-def test_main_limpo(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+def test_main_clean(monkeypatch):
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
     monkeypatch.setattr(guardian, "scan", lambda: None)
     result = guardian._main([])
     assert result == 0
+
+
+def test_gui_dialog_text_runtime_pt_br(monkeypatch):
+    monkeypatch.setattr(i18n, "LANG", "pt-BR")
+    monkeypatch.setattr(guardian.sys, "platform", "linux")
+    calls = []
+    monkeypatch.setattr(guardian.subprocess, "Popen", lambda cmd, **kw: calls.append(cmd))
+    guardian._gui_notice(guardian.Match("V", "anticheat", "vgc.exe", "1"), "runtime")
+    title, body = calls[0][4], calls[0][6]
+    assert title == "LAN Remote Desktop bloqueado - risco de banimento"
+    assert "foi encerrado." in body
+    assert "Feche o jogo/anticheat e tente novamente." in body

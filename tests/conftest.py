@@ -1,10 +1,10 @@
 import os
 import sys
 
-# DEVE rodar ANTES de importar qualquer server.* ---
-os.environ["RL_GUARDIAN"] = "off"
-os.environ["RL_ENCODER"] = "x264"
-os.environ.setdefault("RL_AUDIO_PRESET", "media")
+# MUST run BEFORE importing any server.* ---
+os.environ["LRD_GUARDIAN"] = "off"
+os.environ["LRD_ENCODER"] = "x264"
+os.environ.setdefault("LRD_AUDIO_PRESET", "medium")
 
 import pytest
 
@@ -15,6 +15,6 @@ if ROOT not in sys.path:
 
 @pytest.fixture(autouse=True)
 def _clean_env(monkeypatch):
-    monkeypatch.setenv("RL_GUARDIAN", "off")
-    monkeypatch.setenv("RL_ENCODER", "x264")
+    monkeypatch.setenv("LRD_GUARDIAN", "off")
+    monkeypatch.setenv("LRD_ENCODER", "x264")
     yield

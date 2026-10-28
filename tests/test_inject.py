@@ -1,4 +1,5 @@
 import pytest
+
 from server import inject
 from tests.helpers import FakeUInput
 
@@ -10,7 +11,7 @@ def inj(monkeypatch):
     return inject.Injector()
 
 
-def test_init_cria_tres_devices(inj):
+def test_init_creates_three_devices(inj):
     assert len(FakeUInput.instances) == 3
 
 
@@ -25,7 +26,6 @@ def test_set_geometry(inj):
 def test_move_abs_clamp(inj):
     inj.move_abs(-1, 2)
     pointer = inj.pointer
-    written_codes = [w[1] for w in pointer.writes]
     assert pointer.syns >= 1
     # ABS_X and ABS_Y should have been written
     from evdev import ecodes as e
@@ -33,7 +33,7 @@ def test_move_abs_clamp(inj):
     assert e.ABS_X in abs_codes
     assert e.ABS_Y in abs_codes
     # values clamped to [0, ABS_MAX]
-    for etype, code, val in pointer.writes:
+    for _etype, code, val in pointer.writes:
         if code in (e.ABS_X, e.ABS_Y):
             assert 0 <= val <= inject.ABS_MAX
 
@@ -45,8 +45,7 @@ def test_move_rel(inj):
     assert len(inj.pointer.writes) > writes_before
 
 
-def test_mouse_button_valido_e_invalido(inj):
-    from evdev import ecodes as e
+def test_mouse_button_valid_and_invalid(inj):
     writes_before = len(inj.pointer.writes)
     inj.mouse_button(0, True)
     assert len(inj.pointer.writes) > writes_before
@@ -56,7 +55,7 @@ def test_mouse_button_valido_e_invalido(inj):
     assert len(inj.pointer.writes) == writes_after
 
 
-def test_wheel_sinais(inj):
+def test_wheel_signs(inj):
     from evdev import ecodes as e
     # dy > 0
     inj.wheel(0, 1)
@@ -76,16 +75,16 @@ def test_wheel_sinais(inj):
     assert e.REL_HWHEEL in all_codes
 
 
-def test_key_valido_e_invalido(inj):
+def test_key_valid_and_invalid(inj):
     writes_before = len(inj.keyboard.writes)
     inj.key("KeyA", True)
     assert len(inj.keyboard.writes) > writes_before
     writes_after = len(inj.keyboard.writes)
-    inj.key("NaoExiste", True)
+    inj.key("DoesNotExist", True)
     assert len(inj.keyboard.writes) == writes_after
 
 
-def test_gamepad_axes_completo(inj):
+def test_gamepad_axes_full(inj):
     from evdev import ecodes as e
     axes = [0.5, -0.5, 1.0, -1.0]
     # buttons: indices 0-6 have p=True/v=0.5, indices 7-16 have p=False/v=0.0
@@ -102,9 +101,9 @@ def test_gamepad_axes_completo(inj):
     assert e.ABS_RZ in all_codes
 
 
-def test_gamepad_axes_curto(inj):
+def test_gamepad_axes_short(inj):
     from evdev import ecodes as e
-    # len(axes) < 4: não entra no bloco de eixos mas escreve Z/RZ/HAT/botões
+    # len(axes) < 4: skips the axes block but still writes Z/RZ/HAT/buttons
     inj.gamepad_state([0.0], [])
     gp = inj.gamepad
     assert gp.syns >= 1
@@ -115,8 +114,7 @@ def test_gamepad_axes_curto(inj):
     assert e.ABS_X not in all_codes
 
 
-def test_handle_todos_os_t(inj, monkeypatch):
-    from evdev import ecodes as e
+def test_handle_every_t(inj, monkeypatch):
     handlers = {
         "m": {"t": "m", "x": 0.5, "y": 0.5},
         "mr": {"t": "mr", "dx": 0.01, "dy": 0.01},
@@ -126,7 +124,7 @@ def test_handle_todos_os_t(inj, monkeypatch):
         "k": {"t": "k", "code": "KeyA", "down": True},
         "g": {"t": "g", "a": [0.0, 0.0, 0.0, 0.0], "b": []},
     }
-    for t, msg in handlers.items():
+    for msg in handlers.values():
         inj.handle(msg)  # must not raise
     inj.handle({"t": "zzz"})  # no-op, must not raise
 
@@ -142,4 +140,4 @@ def test_close_swallows(monkeypatch):
     monkeypatch.setattr(inject, "UInput", FakeUInput)
     inj2 = inject.Injector()
     inj2.pointer = FakeUInput(close_raises=True)
-    inj2.close()  # não deve levantar
+    inj2.close()  # must not raise

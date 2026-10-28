@@ -1,10 +1,11 @@
 """
-Captura o audio que sai do PC (monitor do sink PulseAudio/PipeWire), encoda em
-Opus e entrega pacotes Opus CRUS (1 por mensagem) prontos pro WebCodecs
-AudioDecoder do navegador.
+Captures the audio coming out of the PC (monitor of the PulseAudio/PipeWire
+sink), encodes it to Opus and delivers RAW Opus packets (1 per message) ready
+for the browser's WebCodecs AudioDecoder.
 
-ffmpeg so sabe muxar Opus em Ogg; entao aqui fazemos um parser Ogg incremental
-que remonta os pacotes via lacing e descarta os 2 headers (OpusHead/OpusTags).
+ffmpeg can only mux Opus into Ogg; so here we run an incremental Ogg parser
+that reassembles the packets through lacing and drops the 2 headers
+(OpusHead/OpusTags).
 
     pulse(monitor) -> libopus -> ogg(pipe) -> [parser Ogg] -> pacotes Opus
 """
@@ -19,34 +20,34 @@ from dataclasses import dataclass
 SAMPLE_RATE = 48000
 CHANNELS = 2
 
-# token especial do PulseAudio/pipewire-pulse: segue o monitor do sink default
-# sem depender de pactl (que pode nao existir em hosts PipeWire puros).
+# special PulseAudio/pipewire-pulse token: follows the default sink's monitor
+# without depending on pactl (which may be missing on pure PipeWire hosts).
 DEFAULT_MONITOR_TOKEN = "@DEFAULT_MONITOR@"
 
 
 @dataclass
 class AudioPreset:
     name: str
-    bitrate: str        # ex.: "128k"
-    application: str     # "audio" (musica) ou "voip"
+    bitrate: str        # e.g. "128k"
+    application: str     # "audio" (music) or "voip"
 
 
 AUDIO_PRESETS = {
-    "alta":   AudioPreset("alta",   "256k", "audio"),
-    "media":  AudioPreset("media",  "128k", "audio"),
-    "baixa":  AudioPreset("baixa",  "64k",  "audio"),
-    "voz":    AudioPreset("voz",    "48k",  "voip"),
+    "high":   AudioPreset("high",   "256k", "audio"),
+    "medium": AudioPreset("medium", "128k", "audio"),
+    "low":    AudioPreset("low",    "64k",  "audio"),
+    "voice":  AudioPreset("voice",  "48k",  "voip"),
 }
-DEFAULT_AUDIO_PRESET = os.environ.get("RL_AUDIO_PRESET", "media")
+DEFAULT_AUDIO_PRESET = os.environ.get("LRD_AUDIO_PRESET", "medium")
 
 
 _SRC_RE = re.compile(r"^\s*\*?\s*(\S+)\s+\[([^\]]*)\]")
 
 
 def list_monitors() -> list[dict]:
-    """Lista as monitor sources via `ffmpeg -sources pulse` (sem precisar de pactl)."""
+    """Lists the monitor sources through `ffmpeg -sources pulse` (no pactl needed)."""
     try:
-        # ffmpeg imprime a lista no stderr e sai com codigo !=0; tudo bem
+        # ffmpeg prints the list to stderr and exits with code !=0; that is fine
         out = subprocess.run(
             ["ffmpeg", "-hide_banner", "-sources", "pulse"],
             capture_output=True, text=True, timeout=8,
@@ -66,16 +67,16 @@ def list_monitors() -> list[dict]:
 
 
 def default_monitor() -> str:
-    """Fonte de captura padrao: segue o sink default automaticamente."""
-    forced = os.environ.get("RL_AUDIO_SOURCE")
+    """Default capture source: follows the default sink automatically."""
+    forced = os.environ.get("LRD_AUDIO_SOURCE")
     if forced:
         return forced
     return DEFAULT_MONITOR_TOKEN
 
 
 def audio_available() -> bool:
-    """Audio disponivel se ffmpeg tem suporte a pulse e ha >=1 monitor (ou forcado)."""
-    if os.environ.get("RL_AUDIO_SOURCE"):
+    """Audio is available if ffmpeg supports pulse and there is >=1 monitor (or one is forced)."""
+    if os.environ.get("LRD_AUDIO_SOURCE"):
         return True
     if shutil.which("ffmpeg") is None:
         return False
@@ -83,11 +84,11 @@ def audio_available() -> bool:
 
 
 class OggOpusParser:
-    """Parser Ogg incremental: alimenta bytes, devolve pacotes Opus (sem headers)."""
+    """Incremental Ogg parser: feed bytes, get Opus packets back (without headers)."""
 
     def __init__(self):
         self._buf = bytearray()
-        self._partial = bytearray()   # pacote ainda sendo remontado (cruza segmentos/paginas)
+        self._partial = bytearray()   # packet still being reassembled (spans segments/pages)
         self._headers_left = 2        # OpusHead + OpusTags
 
     def feed(self, data: bytes) -> list[bytes]:
@@ -105,7 +106,7 @@ class OggOpusParser:
         start = buf.find(b"OggS")
         if start < 0:
             if len(buf) > 4:
-                del buf[:-4]          # mantem so a cauda que pode iniciar "OggS"
+                del buf[:-4]          # keep only the tail that may start an "OggS"
             return None
         if start > 0:
             del buf[:start]
@@ -127,7 +128,7 @@ class OggOpusParser:
 
     def _emit_page(self, page, packets: list[bytes]):
         header_type, seg_table, body = page
-        # se a pagina NAO continua um pacote anterior, descarta sobra orfã
+        # if the page does NOT continue a previous packet, drop the orphan leftover
         if not (header_type & 0x01):
             self._partial = bytearray()
         off = 0
@@ -135,10 +136,10 @@ class OggOpusParser:
         for lacing in seg_table:
             cur += body[off:off + lacing]
             off += lacing
-            if lacing < 255:          # fim de pacote
+            if lacing < 255:          # end of packet
                 self._take_packet(bytes(cur), packets)
                 cur = bytearray()
-        self._partial = cur           # continua na proxima pagina se acabou em 255
+        self._partial = cur           # continues on the next page if it ended at 255
 
     def _take_packet(self, pkt: bytes, packets: list[bytes]):
         if not pkt:
@@ -147,13 +148,13 @@ class OggOpusParser:
             if pkt[:8] in (b"OpusHead", b"OpusTags"):
                 self._headers_left -= 1
                 return
-            # caso raro: ja passou dos headers
+            # rare case: already past the headers
             self._headers_left = 0
         packets.append(pkt)
 
 
 class AudioEncoder:
-    """Roda o ffmpeg (pulse->opus->ogg) e entrega pacotes Opus via callback."""
+    """Runs ffmpeg (pulse->opus->ogg) and delivers Opus packets through a callback."""
 
     def __init__(self, on_packet):
         self._on_packet = on_packet         # callback async(pkt: bytes)
@@ -165,15 +166,15 @@ class AudioEncoder:
     def _build_cmd(self, preset: AudioPreset) -> list[str]:
         return [
             "ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin",
-            # captura com fragmentos curtos -> menor latencia de entrada
+            # capture with short fragments -> lower input latency
             "-f", "pulse", "-fragment_size", "960", "-i", self.source,
             "-ac", str(CHANNELS), "-ar", str(SAMPLE_RATE),
             "-c:a", "libopus",
             "-b:a", preset.bitrate,
             "-vbr", "on", "-application", preset.application,
             "-frame_duration", "20",
-            # CRITICO: o muxer Ogg agrupa ~1s/pagina por padrao (page_duration=1e6),
-            # segurando o audio. Forca 1 pagina por frame (20ms) -> tempo real.
+            # CRITICAL: the Ogg muxer groups ~1s per page by default (page_duration=1e6),
+            # holding the audio back. Force 1 page per frame (20ms) -> real time.
             "-page_duration", "20000",
             "-flush_packets", "1",
             "-f", "ogg", "pipe:1",

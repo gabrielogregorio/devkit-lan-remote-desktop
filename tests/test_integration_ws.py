@@ -1,30 +1,31 @@
 """
-Testes de INTEGRAÇÃO: sobem o app aiohttp de verdade e conversam pelos
-WebSockets do mesmo jeito que `web/app.js` conversa.
+INTEGRATION tests: they start the real aiohttp app and talk over the
+WebSockets the same way `web/app.js` does.
 
-Os únicos fakes são o que toca hardware/processo externo (uinput e ffmpeg);
-Hub, AudioHub, filas, rotas, serialização JSON e o ciclo de vida dos encoders
-são todos reais. É a camada que os testes unitários não pegam: o que acontece
-quando um cliente de verdade conecta, manda coisa errada e desconecta.
+The only fakes are what touches hardware/external processes (uinput and ffmpeg);
+Hub, AudioHub, queues, routes, JSON serialization and the encoder lifecycle
+are all real. This is the layer unit tests miss: what happens when a real
+client connects, sends garbage and disconnects.
 """
 import asyncio
 import json
 
 import pytest
 
-from server import main as M, audio, video
+from server import audio, video
+from server import main as M
 
 MONITORS = [
     {"index": 0, "name": "HDMI-0", "primary": True, "w": 1920, "h": 1080, "x": 0, "y": 0},
     {"index": 1, "name": "DP-1", "primary": False, "w": 1920, "h": 1080, "x": 0, "y": 1080},
 ]
 
-# AUs sintéticas: começam com AUD (0x09) e o keyframe carrega um SPS (NAL 7).
+# Synthetic AUs: they start with an AUD (0x09) and the keyframe carries an SPS (NAL 7).
 AU_KEY = b"\x00\x00\x01\x09\x10" + b"\x00\x00\x01\x67" + b"\x42\xe0\x1e" + b"\xaa" * 8
 AU_DELTA = b"\x00\x00\x01\x09\x30" + b"\x00\x00\x01\x41" + b"\xbb" * 8
 
 
-# ─────────────────────────── fakes de borda ───────────────────────────
+# ─────────────────────────── edge fakes ───────────────────────────
 
 class FakeInjector:
     def __init__(self):
@@ -38,7 +39,7 @@ class FakeInjector:
 
     def handle(self, msg):
         if self.raise_on_handle:
-            raise RuntimeError("injector explodiu")
+            raise RuntimeError("injector blew up")
         self.handled.append(msg)
 
     def close(self):
@@ -46,7 +47,7 @@ class FakeInjector:
 
 
 class FakeScreenEncoder:
-    """Substitui o ffmpeg: guarda o callback pra o teste "gerar" Access Units."""
+    """Replaces ffmpeg: keeps the callback so the test can "generate" Access Units."""
     instances: list["FakeScreenEncoder"] = []
 
     def __init__(self, on_au):
@@ -91,17 +92,17 @@ class FakeAudioEncoder:
         await self.on_pkt(pkt)
 
 
-# ─────────────────────────── infraestrutura ───────────────────────────
+# ─────────────────────────── infrastructure ───────────────────────────
 
-async def wait_until(pred, timeout=2.0, what="condição"):
-    """Espera o handler do WS (que roda em outra task) chegar no estado esperado."""
+async def wait_until(pred, timeout=2.0, what="condition"):
+    """Waits for the WS handler (running in another task) to reach the expected state."""
     loop = asyncio.get_event_loop()
     end = loop.time() + timeout
     while loop.time() < end:
         if pred():
             return True
         await asyncio.sleep(0.005)
-    raise AssertionError(f"{what} não ocorreu em {timeout}s")
+    raise AssertionError(f"{what} did not happen within {timeout}s")
 
 
 @pytest.fixture
@@ -113,8 +114,8 @@ async def client(monkeypatch, aiohttp_client, tmp_path):
     monkeypatch.setattr(audio, "AudioEncoder", FakeAudioEncoder)
     monkeypatch.setattr(video, "get_monitors", lambda: MONITORS)
     monkeypatch.setattr(audio, "audio_available", lambda: True)
-    # perfis de gamepad num arquivo temporário (persistência real, sem mock)
-    monkeypatch.setenv("RL_GAMEPAD_MAP", str(tmp_path / "gamepad-map.json"))
+    # gamepad profiles in a temp file (real persistence, no mock)
+    monkeypatch.setenv("LRD_GAMEPAD_MAP", str(tmp_path / "gamepad-map.json"))
     app = M.build_app()
     return await aiohttp_client(app)
 
@@ -127,167 +128,167 @@ def aud_enc() -> FakeAudioEncoder:
     return FakeAudioEncoder.instances[-1]
 
 
-# ───────────────────────────── vídeo ─────────────────────────────
+# ───────────────────────────── video ─────────────────────────────
 
-async def test_encoder_liga_com_espectador_e_desliga_sem_ninguem(client):
+async def test_encoder_starts_with_a_viewer_and_stops_with_nobody(client):
     enc = vid_enc()
-    assert enc.started == 0, "encoder não pode rodar sem espectador"
+    assert enc.started == 0, "encoder must not run without a viewer"
     ws = await client.ws_connect("/ws/video")
-    await wait_until(lambda: enc.started == 1, what="encoder ligar")
+    await wait_until(lambda: enc.started == 1, what="encoder start")
     await ws.close()
-    await wait_until(lambda: enc.stopped == 1, what="encoder desligar")
+    await wait_until(lambda: enc.stopped == 1, what="encoder stop")
 
 
-async def test_espectador_so_recebe_a_partir_do_keyframe(client):
-    """O VideoDecoder exige keyframe como 1º chunk: o servidor segura os deltas."""
+async def test_viewer_only_receives_from_the_keyframe_on(client):
+    """VideoDecoder requires a keyframe as the 1st chunk: the server holds back the deltas."""
     ws = await client.ws_connect("/ws/video")
     enc = vid_enc()
-    await wait_until(lambda: enc.started == 1, what="encoder ligar")
+    await wait_until(lambda: enc.started == 1, what="encoder start")
 
-    await enc.push(False, AU_DELTA)          # antes do keyframe: descartado
+    await enc.push(False, AU_DELTA)          # before the keyframe: dropped
     await enc.push(True, AU_KEY)
     await enc.push(False, AU_DELTA)
 
     first = await ws.receive(timeout=2)
-    assert first.data == AU_KEY, "o 1º AU entregue tem que ser o keyframe"
+    assert first.data == AU_KEY, "the 1st AU delivered has to be the keyframe"
     second = await ws.receive(timeout=2)
     assert second.data == AU_DELTA
     await ws.close()
 
 
-async def test_fanout_entrega_o_mesmo_au_para_todos(client):
+async def test_fanout_delivers_the_same_au_to_everyone(client):
     a = await client.ws_connect("/ws/video")
     b = await client.ws_connect("/ws/video")
     enc = vid_enc()
     hub = client.app["hub"]
-    await wait_until(lambda: len(hub.clients) == 2, what="2 espectadores")
+    await wait_until(lambda: len(hub.clients) == 2, what="2 viewers")
 
     await enc.push(True, AU_KEY)
     assert (await a.receive(timeout=2)).data == AU_KEY
     assert (await b.receive(timeout=2)).data == AU_KEY
 
-    # um sai, o outro continua recebendo (encoder segue ligado)
+    # one leaves, the other keeps receiving (encoder stays on)
     await a.close()
-    await wait_until(lambda: len(hub.clients) == 1, what="1 espectador")
+    await wait_until(lambda: len(hub.clients) == 1, what="1 viewer")
     assert enc.stopped == 0
     await enc.push(True, AU_KEY)
     assert (await b.receive(timeout=2)).data == AU_KEY
     await b.close()
 
 
-async def test_troca_de_preset_manda_reset_e_reinicia_encoder(client):
+async def test_preset_change_sends_reset_and_restarts_encoder(client):
     ws = await client.ws_connect("/ws/video")
     inp = await client.ws_connect("/ws/input")
     enc = vid_enc()
-    await wait_until(lambda: enc.started == 1, what="encoder ligar")
+    await wait_until(lambda: enc.started == 1, what="encoder start")
     await enc.push(True, AU_KEY)
     assert (await ws.receive(timeout=2)).data == AU_KEY
 
     await inp.send_json({"t": "q", "preset": "low"})
     msg = await ws.receive(timeout=2)
-    assert json.loads(msg.data) == {"t": "reset"}, "cliente precisa recriar o decoder"
+    assert json.loads(msg.data) == {"t": "reset"}, "client must recreate the decoder"
 
-    await wait_until(lambda: enc.stopped == 1, what="encoder antigo parar")
-    novo = vid_enc()
-    assert novo is not enc and novo.started == 1
-    assert novo.preset.max_h == 540 and novo.preset.fps == 60
+    await wait_until(lambda: enc.stopped == 1, what="old encoder stop")
+    new = vid_enc()
+    assert new is not enc and new.started == 1
+    assert new.preset.max_h == 540 and new.preset.fps == 60
     await ws.close()
     await inp.close()
 
 
-async def test_preset_arrasta_audio_ate_o_usuario_assumir_o_controle(client):
+async def test_preset_drags_audio_until_the_user_takes_control(client):
     inp = await client.ws_connect("/ws/input")
     ahub = client.app["audio_hub"]
 
     await inp.send_json({"t": "q", "preset": "potato"})
-    await wait_until(lambda: ahub.preset_name == "voz", what="áudio seguir o preset")
+    await wait_until(lambda: ahub.preset_name == "voice", what="audio follow the preset")
     assert ahub.manual is False
 
-    # escolha manual de áudio: a partir daqui 'q' não mexe mais no som
-    await inp.send_json({"t": "aq", "preset": "alta"})
-    await wait_until(lambda: ahub.preset_name == "alta", what="áudio manual")
+    # manual audio choice: from here on 'q' no longer touches the sound
+    await inp.send_json({"t": "aq", "preset": "high"})
+    await wait_until(lambda: ahub.preset_name == "high", what="manual audio")
     assert ahub.manual is True
 
     await inp.send_json({"t": "q", "preset": "potato"})
     await wait_until(lambda: client.app["hub"].preset_name == "potato",
-                     what="vídeo mudar")
-    assert ahub.preset_name == "alta", "áudio manual não pode ser arrastado"
+                     what="video change")
+    assert ahub.preset_name == "high", "manual audio must not be dragged along"
     await inp.close()
 
 
-async def test_vq_parcial_vira_custom_e_aparece_na_api(client):
+async def test_partial_vq_becomes_custom_and_shows_in_the_api(client):
     inp = await client.ws_connect("/ws/input")
     hub = client.app["hub"]
-    res_antes = hub.settings.max_h
+    res_before = hub.settings.max_h
 
     await inp.send_json({"t": "vq", "fps": 30})
-    await wait_until(lambda: hub.settings.fps == 30, what="fps mudar")
+    await wait_until(lambda: hub.settings.fps == 30, what="fps change")
 
     data = await (await client.get("/api/monitors")).json()
-    assert data["video"] == {"res": res_antes, "fps": 30, "bitrate": hub.settings.bitrate}
+    assert data["video"] == {"res": res_before, "fps": 30, "bitrate": hub.settings.bitrate}
     assert data["current_preset"] == "custom"
     await inp.close()
 
 
-async def test_troca_de_monitor_reinicia_com_a_nova_regiao(client):
+async def test_monitor_change_restarts_with_the_new_region(client):
     ws = await client.ws_connect("/ws/video")
     inp = await client.ws_connect("/ws/input")
     enc = vid_enc()
-    await wait_until(lambda: enc.started == 1, what="encoder ligar")
-    assert enc.region["name"] == "HDMI-0", "sem escolha explícita, captura o primário"
+    await wait_until(lambda: enc.started == 1, what="encoder start")
+    assert enc.region["name"] == "HDMI-0", "without an explicit choice, it captures the primary"
 
     await inp.send_json({"t": "mon", "i": 1})
-    await wait_until(lambda: vid_enc() is not enc, what="encoder reiniciar")
+    await wait_until(lambda: vid_enc() is not enc, what="encoder restart")
     assert vid_enc().region["name"] == "DP-1"
-    # a geometria do mouse acompanha a região capturada
+    # the mouse geometry follows the captured region
     total, region = client.app["injector"].geometry
     assert total == (1920, 2160) and region["name"] == "DP-1"
     await ws.close()
     await inp.close()
 
 
-# ───────────────────────────── áudio ─────────────────────────────
+# ───────────────────────────── audio ─────────────────────────────
 
-async def test_audio_liga_com_ouvinte_entrega_pacotes_e_desliga(client):
+async def test_audio_starts_with_a_listener_delivers_packets_and_stops(client):
     enc = aud_enc()
     assert enc.started == 0
     ws = await client.ws_connect("/ws/audio")
-    await wait_until(lambda: enc.started == 1, what="áudio ligar")
+    await wait_until(lambda: enc.started == 1, what="audio start")
 
     await enc.push(b"opus-pkt-1")
     assert (await ws.receive(timeout=2)).data == b"opus-pkt-1"
 
     await ws.close()
-    await wait_until(lambda: enc.stopped == 1, what="áudio desligar")
+    await wait_until(lambda: enc.stopped == 1, what="audio stop")
 
 
 # ───────────────────────────── input ─────────────────────────────
 
-async def test_input_chega_no_injector(client):
+async def test_input_reaches_the_injector(client):
     inp = await client.ws_connect("/ws/input")
     injector = client.app["injector"]
     await inp.send_json({"t": "k", "code": "KeyA", "down": True})
-    await wait_until(lambda: injector.handled, what="tecla chegar")
+    await wait_until(lambda: injector.handled, what="key arrive")
     assert injector.handled[0] == {"t": "k", "code": "KeyA", "down": True}
     await inp.close()
 
 
-LIXO = [
-    "isso não é json",
-    "[]",                                   # JSON válido, mas não é um comando
+GARBAGE = [
+    "this is not json",
+    "[]",                                   # valid JSON, but not a command
     "5",
     '"texto"',
     "null",
-    '{"t": 42}',                            # tipo desconhecido
-    '{"t": "m"}',                           # faltando x/y
-    '{"t": "m", "x": "abc", "y": null}',    # tipos errados
+    '{"t": 42}',                            # unknown type
+    '{"t": "m"}',                           # missing x/y
+    '{"t": "m", "x": "abc", "y": null}',    # wrong types
     '{"t": "k"}',
-    '{"t": "g", "a": "nao-e-lista", "b": 7}',
-    '{"t": "vq", "res": "abc"}',            # números inválidos
+    '{"t": "g", "a": "not-a-list", "b": 7}',
+    '{"t": "vq", "res": "abc"}',            # invalid numbers
     '{"t": "vq", "res": [720]}',
     '{"t": "vq", "fps": {"a": 1}}',
-    '{"t": "vq", "bitrate": "sei-la"}',
-    '{"t": "q", "preset": ["low"]}',        # não-hashable
+    '{"t": "vq", "bitrate": "whatever"}',
+    '{"t": "q", "preset": ["low"]}',        # unhashable
     '{"t": "q", "preset": null}',
     '{"t": "aq", "preset": {"x": 1}}',
     '{"t": "mon", "i": "x"}',
@@ -295,31 +296,31 @@ LIXO = [
 ]
 
 
-@pytest.mark.parametrize("payload", LIXO)
-async def test_input_sobrevive_a_payload_malformado(client, payload):
-    """Nenhuma mensagem torta pode derrubar o canal de input do cliente."""
+@pytest.mark.parametrize("payload", GARBAGE)
+async def test_input_survives_malformed_payload(client, payload):
+    """No malformed message may bring down the client's input channel."""
     inp = await client.ws_connect("/ws/input")
     injector = client.app["injector"]
     await inp.send_str(payload)
-    # o canal continua vivo: o comando seguinte (válido) tem que chegar
+    # the channel stays alive: the next (valid) command has to arrive
     await inp.send_json({"t": "k", "code": "KeyZ", "down": True})
     await wait_until(lambda: {"t": "k", "code": "KeyZ", "down": True} in injector.handled,
-                     what=f"canal sobreviver a {payload!r}")
+                     what=f"channel survive {payload!r}")
     assert not inp.closed
     await inp.close()
 
 
-async def test_input_ignora_binario_e_continua(client):
+async def test_input_ignores_binary_and_keeps_going(client):
     inp = await client.ws_connect("/ws/input")
     injector = client.app["injector"]
     await inp.send_bytes(b"\x00\x01\x02")
     await inp.send_json({"t": "md", "b": 0})
-    await wait_until(lambda: injector.handled, what="canal sobreviver a binário")
+    await wait_until(lambda: injector.handled, what="channel survive binary")
     assert injector.handled[-1] == {"t": "md", "b": 0}
     await inp.close()
 
 
-async def test_input_sobrevive_a_injector_que_explode(client):
+async def test_input_survives_an_injector_that_blows_up(client):
     inp = await client.ws_connect("/ws/input")
     injector = client.app["injector"]
     injector.raise_on_handle = True
@@ -327,75 +328,76 @@ async def test_input_sobrevive_a_injector_que_explode(client):
     await asyncio.sleep(0.05)
     injector.raise_on_handle = False
     await inp.send_json({"t": "k", "code": "KeyB", "down": True})
-    await wait_until(lambda: injector.handled, what="canal sobreviver ao erro")
+    await wait_until(lambda: injector.handled, what="channel survive the error")
     await inp.close()
 
 
-async def test_vq_absurdo_e_clampado_e_nao_derruba_o_encoder(client):
-    """Um cliente pedindo 99999p / 5000fps não pode inviabilizar o ffmpeg."""
+async def test_absurd_vq_is_clamped_and_does_not_kill_the_encoder(client):
+    """A client asking for 99999p / 5000fps must not make ffmpeg unusable."""
     inp = await client.ws_connect("/ws/input")
     hub = client.app["hub"]
     await inp.send_json({"t": "vq", "res": 999999, "fps": 5000, "bitrate": "99M"})
-    await wait_until(lambda: hub.settings.max_h != 900, what="vq aplicar")
+    await wait_until(lambda: hub.settings.max_h != 900, what="vq apply")
     assert hub.settings.max_h <= video.RES_MAX
     assert hub.settings.fps <= video.FPS_MAX
     assert hub.settings.bitrate == "99M"
 
     await inp.send_json({"t": "vq", "res": 1, "fps": 0})
-    await wait_until(lambda: hub.settings.fps == video.FPS_MIN, what="clamp mínimo")
+    await wait_until(lambda: hub.settings.fps == video.FPS_MIN, what="minimum clamp")
     assert hub.settings.max_h == video.RES_MIN
     await inp.close()
 
 
-# ─────────────────────────── HTTP / estáticos ───────────────────────────
+# ─────────────────────────── HTTP / static ───────────────────────────
 
-async def test_pagina_de_debug_de_gamepad_e_servida(client):
+async def test_gamepad_debug_page_is_served(client):
     resp = await client.get("/gamepad-debug.html")
     assert resp.status == 200
     body = await resp.text()
-    assert "Diagnóstico de gamepad" in body
+    # language-neutral check: the page text itself is translated in web/
+    assert "gamepad" in body.lower() and "<h1" in body
 
 
-async def test_gamepad_map_ciclo_completo_com_persistencia_real(client):
-    perfil = {"buttons": {"a": 2, "b": 1}, "axes": {"lx": 0},
+async def test_gamepad_map_full_cycle_with_real_persistence(client):
+    profile = {"buttons": {"a": 2, "b": 1}, "axes": {"lx": 0},
               "triggers": {"lt": {"src": "axis", "i": 4, "min": 0, "max": -1}}}
 
     assert await (await client.get("/api/gamepad-map")).json() == {}
 
-    resp = await client.post("/api/gamepad-map", json={"id": "Pad PS2", "map": perfil})
+    resp = await client.post("/api/gamepad-map", json={"id": "Pad PS2", "map": profile})
     assert resp.status == 200
 
-    salvos = await (await client.get("/api/gamepad-map")).json()
-    assert salvos == {"Pad PS2": perfil}, "o perfil volta idêntico (blob opaco)"
+    saved = await (await client.get("/api/gamepad-map")).json()
+    assert saved == {"Pad PS2": profile}, "the profile comes back identical (opaque blob)"
 
     resp = await client.delete("/api/gamepad-map", json={"id": "Pad PS2"})
     assert (await resp.json()) == {"ok": True, "removed": True}
     assert await (await client.get("/api/gamepad-map")).json() == {}
 
-    # apagar de novo: não existe mais, mas não é erro
+    # deleting again: it no longer exists, but it is not an error
     resp = await client.delete("/api/gamepad-map", json={"id": "Pad PS2"})
     assert (await resp.json())["removed"] is False
 
 
-@pytest.mark.parametrize("body", ['"sou-uma-string"', "[1, 2]", "5", "null"])
-async def test_gamepad_map_rejeita_json_que_nao_e_objeto(client, body):
-    """JSON válido mas sem forma de objeto tem que dar 400 - já deu 500 aqui."""
-    cabecalho = {"Content-Type": "application/json"}
-    for metodo in (client.post, client.delete):
-        resp = await metodo("/api/gamepad-map", data=body, headers=cabecalho)
+@pytest.mark.parametrize("body", ['"i-am-a-string"', "[1, 2]", "5", "null"])
+async def test_gamepad_map_rejects_json_that_is_not_an_object(client, body):
+    """Valid JSON that is not an object has to give 400 - it used to give 500 here."""
+    header = {"Content-Type": "application/json"}
+    for method in (client.post, client.delete):
+        resp = await method("/api/gamepad-map", data=body, headers=header)
         assert resp.status == 400
         assert "error" in await resp.json()
-    # servidor segue de pé
+    # the server is still up
     assert (await client.get("/api/monitors")).status == 200
 
 
-async def test_api_monitors_bate_com_o_estado_do_hub(client):
+async def test_api_monitors_matches_the_hub_state(client):
     data = await (await client.get("/api/monitors")).json()
     hub = client.app["hub"]
     assert data["current_preset"] == hub.preset_name
     assert data["video"]["res"] == hub.settings.max_h
     assert [m["name"] for m in data["monitors"]] == ["HDMI-0", "DP-1"]
-    # as opções oferecidas à UI têm que ser aceitáveis pelo canal 'vq'
+    # the options offered to the UI have to be acceptable to the 'vq' channel
     for r in data["res_options"]:
         assert video.RES_MIN <= r <= video.RES_MAX
     for f in data["fps_options"]:

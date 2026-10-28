@@ -1,13 +1,13 @@
 import asyncio
 import json
 import ssl as ssl_mod
-import pytest
 from unittest import mock
-from aiohttp import web
 
-from server import main as M, video, audio, guardian
+import pytest
+
+from server import audio, guardian, video
+from server import main as M
 from tests.helpers import FakeUInput
-
 
 # ──────────────────────────── helpers ────────────────────────────────
 
@@ -27,13 +27,13 @@ def mk_async_encoder():
 
 @pytest.fixture(autouse=True)
 def _patch_get_monitors(monkeypatch):
-    """Evita chamadas reais ao xrandr em todos os testes deste módulo."""
+    """Avoids real xrandr calls in every test of this module."""
     monkeypatch.setattr(video, "get_monitors", lambda: [])
 
 
 # ───────────────────────── VideoClient ─────────────────────────
 
-def test_videoclient_feed_inativo_nao_key():
+def test_videoclient_feed_inactive_non_key():
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
     assert c.active is False
@@ -41,7 +41,7 @@ def test_videoclient_feed_inativo_nao_key():
     assert c.q.empty()
 
 
-def test_videoclient_feed_key_ativa():
+def test_videoclient_feed_key_activates():
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
     c.feed(True, b"keyframe")
@@ -53,10 +53,10 @@ def test_videoclient_feed_queuefull():
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
     c.active = True
-    # Enche a fila
+    # Fill the queue
     for _ in range(180):
         c.q.put_nowait(("bin", b"x"))
-    # Próximo feed deve acionar _flush + active=False
+    # The next feed must trigger _flush + active=False
     c.feed(True, b"overflow")
     assert c.active is False
 
@@ -67,7 +67,7 @@ def test_videoclient_reset():
     c.active = True
     c.q.put_nowait(("bin", b"something"))
     c.reset()
-    # fila deve ter a mensagem de reset
+    # the queue must hold the reset message
     items = []
     while not c.q.empty():
         items.append(c.q.get_nowait())
@@ -76,23 +76,23 @@ def test_videoclient_reset():
 
 
 def test_videoclient_flush_queueempty():
-    # QueueEmpty durante _flush → except QueueEmpty: break (linhas 66-67)
+    # QueueEmpty during _flush -> except QueueEmpty: break
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
     c.q = mock.MagicMock()
     c.q.empty = mock.Mock(return_value=False)
     c.q.get_nowait = mock.Mock(side_effect=asyncio.QueueEmpty())
-    c._flush()  # não deve levantar
+    c._flush()  # must not raise
 
 
 def test_videoclient_reset_queuefull():
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
-    # Enche a fila e substitui _flush por no-op para forçar QueueFull no reset
+    # Fill the queue and replace _flush with a no-op to force QueueFull on reset
     c.q = asyncio.Queue(maxsize=1)
     c.q.put_nowait(("bin", b"x"))
-    c._flush = lambda: None  # no-op → fila permanece cheia
-    c.reset()  # QueueFull no put_nowait do reset → except QueueFull: pass
+    c._flush = lambda: None  # no-op -> the queue stays full
+    c.reset()  # QueueFull on the reset put_nowait -> except QueueFull: pass
 
 
 async def test_videoclient_sender():
@@ -125,7 +125,7 @@ def test_audioclient_feed():
     assert not c.q.empty()
 
 
-def test_audioclient_feed_full_descarta_antigo():
+def test_audioclient_feed_full_drops_oldest():
     ws = mock.MagicMock()
     c = M.AudioClient(ws)
     c.q = asyncio.Queue(maxsize=1)
@@ -139,14 +139,13 @@ def test_audioclient_feed_full_queueempty():
     c = M.AudioClient(ws)
     c.q = asyncio.Queue(maxsize=1)
     c.q.put_nowait(b"old")
-    # Faz get_nowait lançar QueueEmpty
-    original_get = c.q.get_nowait
+    # Make get_nowait raise QueueEmpty
 
     def raise_empty():
         raise asyncio.QueueEmpty()
 
     c.q.get_nowait = raise_empty
-    c.feed(b"new")  # não deve levantar
+    c.feed(b"new")  # must not raise
 
 
 async def test_audioclient_sender():
@@ -177,13 +176,13 @@ def hub_fixture(monkeypatch):
     return hub, inj, enc
 
 
-def test_hub_preset_inicial_segue_default(hub_fixture):
+def test_hub_initial_preset_follows_default(hub_fixture):
     hub, _, _ = hub_fixture
-    # settings iniciais espelham o preset default
+    # initial settings mirror the default preset
     base = video.PRESETS[video.DEFAULT_PRESET]
     assert (hub.settings.max_h, hub.settings.fps, hub.settings.bitrate) == \
         (base.max_h, base.fps, base.bitrate)
-    # a propriedade .preset entrega os settings atuais (duck-type c/ Preset)
+    # the .preset property returns the current settings (duck-typed with Preset)
     assert hub.preset is hub.settings
 
 
@@ -204,7 +203,7 @@ async def test_hub_on_au_fanout(hub_fixture):
     c2.feed.assert_called_once_with(True, b"au")
 
 
-async def test_hub_add_first_inicia(hub_fixture):
+async def test_hub_add_first_starts(hub_fixture):
     hub, inj, enc = hub_fixture
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
@@ -214,7 +213,7 @@ async def test_hub_add_first_inicia(hub_fixture):
     inj.set_geometry.assert_called()
 
 
-async def test_hub_add_segundo_nao_reinicia(hub_fixture):
+async def test_hub_add_second_does_not_restart(hub_fixture):
     hub, _, enc = hub_fixture
     ws = mock.MagicMock()
     c1 = M.VideoClient(ws)
@@ -224,7 +223,7 @@ async def test_hub_add_segundo_nao_reinicia(hub_fixture):
     assert enc.start.call_count == 1
 
 
-async def test_hub_remove_ultimo_para(hub_fixture):
+async def test_hub_remove_last_stops(hub_fixture):
     hub, _, enc = hub_fixture
     ws = mock.MagicMock()
     c = M.VideoClient(ws)
@@ -234,7 +233,7 @@ async def test_hub_remove_ultimo_para(hub_fixture):
     enc.stop.assert_called()
 
 
-async def test_hub_remove_nao_ultimo(hub_fixture):
+async def test_hub_remove_not_last(hub_fixture):
     hub, _, enc = hub_fixture
     ws = mock.MagicMock()
     c1 = M.VideoClient(ws)
@@ -247,7 +246,7 @@ async def test_hub_remove_nao_ultimo(hub_fixture):
     enc.stop.assert_not_called()
 
 
-async def test_hub_restart_rodando(monkeypatch):
+async def test_hub_restart_running(monkeypatch):
     encs = []
 
     def mk_enc(cb):
@@ -265,7 +264,7 @@ async def test_hub_restart_rodando(monkeypatch):
     assert encs[1].start.called
 
 
-async def test_hub_restart_parado(hub_fixture):
+async def test_hub_restart_stopped(hub_fixture):
     hub, inj, enc = hub_fixture
     hub._running = False
     await hub._restart()
@@ -273,7 +272,7 @@ async def test_hub_restart_parado(hub_fixture):
     inj.set_geometry.assert_called()
 
 
-async def test_hub_set_preset_muda(monkeypatch):
+async def test_hub_set_preset_changes(monkeypatch):
     encs = []
 
     def mk_enc(cb):
@@ -291,9 +290,9 @@ async def test_hub_set_preset_muda(monkeypatch):
     assert hub.preset_name == "low"
 
 
-async def test_hub_set_preset_reaplica_mesmo_nome(hub_fixture):
-    # reselecionar o mesmo preset reaplica os 3 params (zera overrides custom)
-    # e reinicia o encoder.
+async def test_hub_set_preset_reapplies_same_name(hub_fixture):
+    # reselecting the same preset reapplies the 3 params (clears custom overrides)
+    # and restarts the encoder.
     hub, _, enc = hub_fixture
     hub._running = True
     hub.preset_name = "high"
@@ -303,26 +302,26 @@ async def test_hub_set_preset_reaplica_mesmo_nome(hub_fixture):
     assert hub.settings.max_h == video.PRESETS["high"].max_h
 
 
-async def test_hub_set_preset_invalido(hub_fixture):
+async def test_hub_set_preset_invalid(hub_fixture):
     hub, _, enc = hub_fixture
     hub._running = True
     await hub.set_preset("nonexistent")
     enc.stop.assert_not_called()
 
 
-async def test_hub_set_video_independente(hub_fixture):
-    # override só de fps: muda settings, vira "custom" e reinicia
+async def test_hub_set_video_independent(hub_fixture):
+    # fps-only override: changes settings, becomes "custom" and restarts
     hub, _, enc = hub_fixture
     hub._running = True
     before = hub.settings
     await hub.set_video(fps=90)
     assert hub.settings.fps == 90
-    assert hub.settings.max_h == before.max_h  # resto preservado
+    assert hub.settings.max_h == before.max_h  # the rest is preserved
     assert hub.preset_name == "custom"
     enc.stop.assert_called()
 
 
-async def test_hub_set_video_sem_mudanca_nao_reinicia(hub_fixture):
+async def test_hub_set_video_without_change_does_not_restart(hub_fixture):
     hub, _, enc = hub_fixture
     hub._running = True
     s = hub.settings
@@ -330,7 +329,7 @@ async def test_hub_set_video_sem_mudanca_nao_reinicia(hub_fixture):
     enc.stop.assert_not_called()
 
 
-async def test_hub_set_monitor_muda(monkeypatch):
+async def test_hub_set_monitor_changes(monkeypatch):
     encs = []
 
     def mk_enc(cb):
@@ -348,7 +347,7 @@ async def test_hub_set_monitor_muda(monkeypatch):
     assert hub.monitor_index == 1
 
 
-async def test_hub_set_monitor_igual(hub_fixture):
+async def test_hub_set_monitor_same(hub_fixture):
     hub, _, enc = hub_fixture
     hub._running = True
     hub.monitor_index = 1
@@ -373,7 +372,7 @@ def test_audiohub_preset_fallback(ahub_fixture):
 
 
 async def test_audiohub_on_pkt(ahub_fixture):
-    # AudioHub._on_pkt fanout (linhas 186-187)
+    # AudioHub._on_pkt fanout
     ahub, _ = ahub_fixture
     c1 = mock.MagicMock()
     ahub.clients = {c1}
@@ -390,7 +389,7 @@ async def test_audiohub_add_first(ahub_fixture):
     enc.start.assert_called_once()
 
 
-async def test_audiohub_add_segundo(ahub_fixture):
+async def test_audiohub_add_second(ahub_fixture):
     ahub, enc = ahub_fixture
     ws = mock.MagicMock()
     c1 = M.AudioClient(ws)
@@ -400,7 +399,7 @@ async def test_audiohub_add_segundo(ahub_fixture):
     assert enc.start.call_count == 1
 
 
-async def test_audiohub_remove_ultimo(ahub_fixture):
+async def test_audiohub_remove_last(ahub_fixture):
     ahub, enc = ahub_fixture
     ws = mock.MagicMock()
     c = M.AudioClient(ws)
@@ -410,7 +409,7 @@ async def test_audiohub_remove_ultimo(ahub_fixture):
     enc.stop.assert_called()
 
 
-async def test_audiohub_remove_nao_ultimo(ahub_fixture):
+async def test_audiohub_remove_not_last(ahub_fixture):
     ahub, enc = ahub_fixture
     ws = mock.MagicMock()
     c1 = M.AudioClient(ws)
@@ -422,7 +421,7 @@ async def test_audiohub_remove_nao_ultimo(ahub_fixture):
     enc.stop.assert_not_called()
 
 
-async def test_audiohub_set_preset_rodando(monkeypatch):
+async def test_audiohub_set_preset_running(monkeypatch):
     encs = []
 
     def mk_enc(cb):
@@ -433,36 +432,36 @@ async def test_audiohub_set_preset_rodando(monkeypatch):
     monkeypatch.setattr(audio, "AudioEncoder", mk_enc)
     ahub = M.AudioHub()
     ahub._running = True
-    ahub.preset_name = "media"
-    await ahub.set_preset("alta")
-    assert ahub.preset_name == "alta"
+    ahub.preset_name = "medium"
+    await ahub.set_preset("high")
+    assert ahub.preset_name == "high"
     encs[0].stop.assert_called()
     assert encs[1].start.called
 
 
-async def test_audiohub_set_preset_parado(ahub_fixture):
+async def test_audiohub_set_preset_stopped(ahub_fixture):
     ahub, enc = ahub_fixture
     ahub._running = False
-    ahub.preset_name = "media"
-    await ahub.set_preset("alta")
-    assert ahub.preset_name == "alta"
+    ahub.preset_name = "medium"
+    await ahub.set_preset("high")
+    assert ahub.preset_name == "high"
     enc.stop.assert_not_called()
 
 
-async def test_audiohub_set_preset_invalido(ahub_fixture):
+async def test_audiohub_set_preset_invalid(ahub_fixture):
     ahub, enc = ahub_fixture
     await ahub.set_preset("nonexistent")
     enc.stop.assert_not_called()
 
 
-async def test_audiohub_set_preset_igual(ahub_fixture):
+async def test_audiohub_set_preset_same(ahub_fixture):
     ahub, enc = ahub_fixture
-    ahub.preset_name = "media"
-    await ahub.set_preset("media")
+    ahub.preset_name = "medium"
+    await ahub.set_preset("medium")
     enc.stop.assert_not_called()
 
 
-# ───────────────────────── rotas / app ─────────────────────────
+# ───────────────────────── routes / app ─────────────────────────
 
 @pytest.fixture
 async def client(monkeypatch, aiohttp_client):
@@ -493,7 +492,7 @@ async def test_api_monitors(client, monkeypatch):
     assert "monitors" in data
     assert "presets" in data
     assert "audio_presets" in data
-    # campos novos da qualidade separada
+    # new fields of the split quality controls
     assert set(data["video"]) == {"res", "fps", "bitrate"}
     assert data["res_options"] and data["fps_options"] and data["bitrate_options"]
     assert data["audio_manual"] is False
@@ -517,8 +516,8 @@ async def test_api_gamepad_map_post_ok(client, monkeypatch):
     assert saved == {"id": "Pad", "map": {"buttons": {"a": 2}}}
 
 
-async def test_api_gamepad_map_post_json_invalido(client):
-    resp = await client.post("/api/gamepad-map", data="naoeh json",
+async def test_api_gamepad_map_post_invalid_json(client):
+    resp = await client.post("/api/gamepad-map", data="not json",
                              headers={"Content-Type": "application/json"})
     assert resp.status == 400
     assert "error" in (await resp.json())
@@ -526,7 +525,7 @@ async def test_api_gamepad_map_post_json_invalido(client):
 
 async def test_api_gamepad_map_post_valueerror(client, monkeypatch):
     def boom(pid, m):
-        raise ValueError("pad_id obrigatorio")
+        raise ValueError("pad_id is required")
     monkeypatch.setattr(M.gamepad, "save_map", boom)
     resp = await client.post("/api/gamepad-map", json={"id": "", "map": {}})
     assert resp.status == 400
@@ -541,22 +540,22 @@ async def test_api_gamepad_map_delete_ok(client, monkeypatch):
     assert body["ok"] is True and body["removed"] is True
 
 
-async def test_api_gamepad_map_delete_json_invalido(client):
-    resp = await client.delete("/api/gamepad-map", data="naoeh json",
+async def test_api_gamepad_map_delete_invalid_json(client):
+    resp = await client.delete("/api/gamepad-map", data="not json",
                                headers={"Content-Type": "application/json"})
     assert resp.status == 400
 
 
 async def test_api_gamepad_map_delete_valueerror(client, monkeypatch):
     def boom(pid):
-        raise ValueError("pad_id obrigatorio")
+        raise ValueError("pad_id is required")
     monkeypatch.setattr(M.gamepad, "delete_map", boom)
     resp = await client.delete("/api/gamepad-map", json={"id": ""})
     assert resp.status == 400
 
 
 async def test_ws_video(client):
-    # Envia mensagem regular (não-CLOSE/ERROR) para cobrir branch 247->246
+    # Sends a regular (non-CLOSE/ERROR) message to cover the loop-continue branch
     ws = await client.ws_connect("/ws/video")
     await ws.send_bytes(b"data")
     await asyncio.sleep(0.02)
@@ -564,31 +563,31 @@ async def test_ws_video(client):
 
 
 async def test_ws_audio(client):
-    # Envia mensagem regular para cobrir branch 264->263
+    # Sends a regular message to cover the loop-continue branch
     ws = await client.ws_connect("/ws/audio")
     await ws.send_bytes(b"data")
     await asyncio.sleep(0.02)
     await ws.close()
 
 
-async def test_ws_input_comandos(client, monkeypatch):
+async def test_ws_input_commands(client, monkeypatch):
     ws = await client.ws_connect("/ws/input")
 
     # preset change
     await ws.send_str(json.dumps({"t": "q", "preset": "low"}))
-    # video independente (vq): resolução, fps e bitrate
+    # independent video (vq): resolution, fps and bitrate
     await ws.send_str(json.dumps({"t": "vq", "res": 720, "fps": 90, "bitrate": "7M"}))
     # audio preset change
-    await ws.send_str(json.dumps({"t": "aq", "preset": "baixa"}))
-    # monitor change (numérico)
+    await ws.send_str(json.dumps({"t": "aq", "preset": "low"}))
+    # monitor change (numeric)
     await ws.send_str(json.dumps({"t": "mon", "i": 1}))
     # monitor change (null)
     await ws.send_str(json.dumps({"t": "mon", "i": None}))
     # input command
     await ws.send_str(json.dumps({"t": "m", "x": 0.5, "y": 0.5}))
-    # JSON inválido → continue
+    # invalid JSON -> continue
     await ws.send_str("NOT_JSON{{{")
-    # Injector.handle com exception → imprime [input] erro
+    # Injector.handle raising -> prints [input] error
     app = client.app
     app["injector"].handle = mock.Mock(side_effect=RuntimeError("test err"))
     await ws.send_str(json.dumps({"t": "m", "x": 0.1, "y": 0.1}))
@@ -596,8 +595,8 @@ async def test_ws_input_comandos(client, monkeypatch):
     await ws.close()
 
 
-async def test_ws_input_q_sincroniza_audio(client):
-    # estado UNICO: um 'q' move video E audio juntos (AUDIO_FOR_QUALITY)
+async def test_ws_input_q_syncs_audio(client):
+    # SINGLE state: one 'q' moves video AND audio together (AUDIO_FOR_QUALITY)
     ws = await client.ws_connect("/ws/input")
     await ws.send_str(json.dumps({"t": "q", "preset": "potato"}))
     await asyncio.sleep(0.05)
@@ -606,9 +605,9 @@ async def test_ws_input_q_sincroniza_audio(client):
     await ws.close()
 
 
-async def test_ws_input_q_preset_sem_audio(client):
-    # 'q' com preset que NAO esta em AUDIO_FOR_QUALITY: audio nao muda
-    # (cobre o ramo falso do `if preset in AUDIO_FOR_QUALITY`)
+async def test_ws_input_q_preset_without_audio(client):
+    # 'q' with a preset that is NOT in AUDIO_FOR_QUALITY: audio does not change
+    # (covers the false branch of `if preset in AUDIO_FOR_QUALITY`)
     before = client.app["audio_hub"].preset_name
     ws = await client.ws_connect("/ws/input")
     await ws.send_str(json.dumps({"t": "q", "preset": "zzz"}))
@@ -617,22 +616,22 @@ async def test_ws_input_q_preset_sem_audio(client):
     await ws.close()
 
 
-async def test_ws_input_aq_marca_manual_e_q_nao_arrasta(client):
-    # depois de um 'aq' manual, um 'q' de preset NAO muda mais o audio.
+async def test_ws_input_aq_marks_manual_and_q_does_not_drag(client):
+    # after a manual 'aq', a preset 'q' NO longer changes the audio.
     ws = await client.ws_connect("/ws/input")
-    await ws.send_str(json.dumps({"t": "aq", "preset": "voz"}))
+    await ws.send_str(json.dumps({"t": "aq", "preset": "voice"}))
     await asyncio.sleep(0.03)
     assert client.app["audio_hub"].manual is True
-    assert client.app["audio_hub"].preset_name == "voz"
-    # 'q' agora nao arrasta o audio (continua "voz")
+    assert client.app["audio_hub"].preset_name == "voice"
+    # 'q' now does not drag the audio (stays "voice")
     await ws.send_str(json.dumps({"t": "q", "preset": "ultra"}))
     await asyncio.sleep(0.03)
-    assert client.app["audio_hub"].preset_name == "voz"
+    assert client.app["audio_hub"].preset_name == "voice"
     await ws.close()
 
 
-def test_audio_for_quality_cobre_todos_presets():
-    # todo nivel de video tem um audio correspondente (sem buracos no estado unico)
+def test_audio_for_quality_covers_all_presets():
+    # every video level has a matching audio one (no holes in the single state)
     assert set(M.AUDIO_FOR_QUALITY) == set(video.PRESETS)
     for a in M.AUDIO_FOR_QUALITY.values():
         assert a in audio.AUDIO_PRESETS
@@ -651,8 +650,7 @@ async def test_ws_audio_close_message(client):
 
 
 async def _make_mock_ws(items):
-    """Cria um mock de WebSocketResponse que itera sobre `items`."""
-    from aiohttp import WSMsgType, WSMessage
+    """Builds a WebSocketResponse mock that iterates over `items`."""
 
     class _MockWS:
         def __init__(self, **kw):
@@ -678,8 +676,8 @@ async def _make_mock_ws(items):
 
 
 async def test_ws_video_error_msg(monkeypatch):
-    # Testa o break em 247-248 via WSMsgType.ERROR
-    from aiohttp import WSMsgType, WSMessage
+    # Tests the ws_video break via WSMsgType.ERROR
+    from aiohttp import WSMessage, WSMsgType
 
     error_msg = WSMessage(type=WSMsgType.ERROR, data=None, extra=None)
     MockWS = await _make_mock_ws([error_msg])
@@ -699,8 +697,8 @@ async def test_ws_video_error_msg(monkeypatch):
 
 
 async def test_ws_audio_error_msg(monkeypatch):
-    # Testa o break em 264-265 via WSMsgType.ERROR
-    from aiohttp import WSMsgType, WSMessage
+    # Tests the ws_audio break via WSMsgType.ERROR
+    from aiohttp import WSMessage, WSMsgType
 
     error_msg = WSMessage(type=WSMsgType.ERROR, data=None, extra=None)
     MockWS = await _make_mock_ws([error_msg])
@@ -716,8 +714,8 @@ async def test_ws_audio_error_msg(monkeypatch):
 
 
 async def test_ws_input_error_msg(monkeypatch):
-    # Testa o break em 281 via WSMsgType.ERROR
-    from aiohttp import WSMsgType, WSMessage
+    # Tests the ws_input break via WSMsgType.ERROR
+    from aiohttp import WSMessage, WSMsgType
 
     error_msg = WSMessage(type=WSMsgType.ERROR, data=None, extra=None)
     MockWS = await _make_mock_ws([error_msg])
@@ -737,7 +735,7 @@ async def test_ws_input_error_msg(monkeypatch):
     await M.ws_input(req)
 
 
-async def test_ws_input_nao_texto(client):
+async def test_ws_input_non_text(client):
     ws = await client.ws_connect("/ws/input")
     await ws.send_bytes(b"binary_data")
     await asyncio.sleep(0.05)
@@ -746,16 +744,16 @@ async def test_ws_input_nao_texto(client):
 
 # ───────────────────────── cleanup ─────────────────────────
 
-async def test_stop_guardian_sem_task(monkeypatch):
-    # stop_guardian sem guardian_task → if task: False → 341->exit
+async def test_stop_guardian_without_task(monkeypatch):
+    # stop_guardian without guardian_task -> `if task:` is False -> exit branch
     FakeUInput.instances.clear()
     monkeypatch.setattr(M, "Injector", lambda: FakeInjector())
     monkeypatch.setattr(video, "ScreenEncoder", lambda cb: mk_async_encoder())
     monkeypatch.setattr(audio, "AudioEncoder", lambda cb: mk_async_encoder())
     app = M.build_app()
     app.freeze()
-    # não chama startup → guardian_task não está no app
-    await app.cleanup()  # stop_guardian: task=None → branch 341->exit
+    # startup is not called -> guardian_task is not in the app
+    await app.cleanup()  # stop_guardian: task=None -> exit branch
 
 
 async def test_on_cleanup(monkeypatch):
@@ -786,10 +784,10 @@ async def test_trip_runtime(monkeypatch):
     def fake_exit(code):
         exit_code["code"] = code
 
-    monkeypatch.setenv("RL_GUARDIAN", "on")
+    monkeypatch.setenv("LRD_GUARDIAN", "on")
     monkeypatch.setattr(guardian, "disabled", lambda: False)
 
-    scan_results = iter([guardian.Match("J", "jogo", "cs2", "1")])
+    scan_results = iter([guardian.Match("J", "game", "cs2", "1")])
     monkeypatch.setattr(guardian, "scan", lambda: next(scan_results))
     monkeypatch.setattr(guardian, "show_block_notice", lambda *a: None)
     monkeypatch.setattr(M.os, "_exit", fake_exit)
@@ -807,12 +805,12 @@ async def test_trip_runtime(monkeypatch):
     app.freeze()
     await app.startup()
 
-    # Aguarda a guardian_task completar
+    # Wait for guardian_task to finish
     task = app.get("guardian_task")
     if task:
         try:
             await asyncio.wait_for(asyncio.shield(task), timeout=2.0)
-        except (asyncio.TimeoutError, Exception):
+        except (TimeoutError, Exception):
             pass
 
     await asyncio.sleep(0)
@@ -825,9 +823,9 @@ async def test_trip_runtime(monkeypatch):
 
 # ───────────────────────── main() ─────────────────────────
 
-def test_main_sem_tls(monkeypatch, tmp_path, capsys):
-    monkeypatch.delenv("RL_CERT", raising=False)
-    monkeypatch.delenv("RL_KEY", raising=False)
+def test_main_without_tls(monkeypatch, tmp_path, capsys):
+    monkeypatch.delenv("LRD_CERT", raising=False)
+    monkeypatch.delenv("LRD_KEY", raising=False)
 
     FakeUInput.instances.clear()
     monkeypatch.setattr(M, "Injector", lambda: FakeInjector())
@@ -839,18 +837,18 @@ def test_main_sem_tls(monkeypatch, tmp_path, capsys):
                         lambda *a, **kw: run_app_calls.update(kw))
     M.main()
     _, err = capsys.readouterr()
-    assert "sem TLS" in err or "AVISO" in err
+    assert "no TLS" in err and "WARNING" in err
     assert run_app_calls.get("ssl_context") is None
 
 
-def test_main_com_tls(monkeypatch, tmp_path):
+def test_main_with_tls(monkeypatch, tmp_path):
     cert_file = tmp_path / "cert.pem"
     key_file = tmp_path / "key.pem"
     cert_file.write_text("CERT")
     key_file.write_text("KEY")
 
-    monkeypatch.setenv("RL_CERT", str(cert_file))
-    monkeypatch.setenv("RL_KEY", str(key_file))
+    monkeypatch.setenv("LRD_CERT", str(cert_file))
+    monkeypatch.setenv("LRD_KEY", str(key_file))
 
     FakeUInput.instances.clear()
     monkeypatch.setattr(M, "Injector", lambda: FakeInjector())
@@ -867,3 +865,49 @@ def test_main_com_tls(monkeypatch, tmp_path):
                         lambda *a, **kw: run_app_calls.update(kw))
     M.main()
     assert run_app_calls.get("ssl_context") is not None
+
+
+# ───────────────────────── make_injector (LRD_INPUT / no uinput) ─────────────────────────
+
+@pytest.mark.parametrize("value", ["off", "0", "false", "no", " OFF "])
+def test_make_injector_lrd_input_off_is_view_only(monkeypatch, capsys, value):
+    monkeypatch.setenv("LRD_INPUT", value)
+    monkeypatch.setattr(M, "Injector", mock.Mock(side_effect=AssertionError("must not open uinput")))
+    inj = M.make_injector()
+    assert isinstance(inj, M.NullInjector)
+    assert "LRD_INPUT=off" in capsys.readouterr().out
+
+
+def test_make_injector_default_uses_uinput(monkeypatch):
+    monkeypatch.delenv("LRD_INPUT", raising=False)
+    fake = FakeInjector()
+    monkeypatch.setattr(M, "Injector", lambda: fake)
+    assert M.make_injector() is fake
+
+
+@pytest.mark.parametrize("error", [PermissionError("denied"), M.UInputError("no uinput")])
+def test_make_injector_falls_back_when_uinput_fails(monkeypatch, capsys, error):
+    monkeypatch.setenv("LRD_INPUT", "on")
+    monkeypatch.setattr(M, "Injector", mock.Mock(side_effect=error))
+    inj = M.make_injector()
+    assert isinstance(inj, M.NullInjector)
+    assert "view only" in capsys.readouterr().out
+
+
+def test_null_injector_does_nothing():
+    inj = M.NullInjector()
+    inj.set_geometry((1920, 1080), {"x": 0, "y": 0, "w": 1920, "h": 1080})
+    inj.handle({"t": "m", "x": 0.5, "y": 0.5})
+    inj.close()
+
+
+async def test_app_starts_view_only_without_uinput(monkeypatch, aiohttp_client):
+    monkeypatch.setenv("LRD_INPUT", "on")
+    monkeypatch.setattr(M, "Injector", mock.Mock(side_effect=OSError("no /dev/uinput")))
+    monkeypatch.setattr(video, "ScreenEncoder", lambda cb: mk_async_encoder())
+    monkeypatch.setattr(audio, "AudioEncoder", lambda cb: mk_async_encoder())
+    client = await aiohttp_client(M.build_app())
+    ws = await client.ws_connect("/ws/input")
+    await ws.send_str(json.dumps({"t": "m", "x": 0.5, "y": 0.5}))
+    await ws.close()
+    assert isinstance(client.server.app["injector"], M.NullInjector)

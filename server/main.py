@@ -1,13 +1,13 @@
 """
-remote-link - servidor.
+LAN Remote Desktop - server.
 
-  HTTPS estatico   ->  cliente web (web/)
-  WSS /ws/video    ->  Access Units H.264 (binario)  [+ controle 'reset' em texto]
-  WSS /ws/audio    ->  pacotes Opus (binario)        [+ 'cfg' com sample rate]
-  WSS /ws/input    ->  mouse/teclado/gamepad e troca de qualidade (texto JSON)
+  static HTTPS     ->  web client (web/)
+  WSS /ws/video    ->  H.264 Access Units (binary)   [+ 'reset' control as text]
+  WSS /ws/audio    ->  Opus packets (binary)         [+ 'cfg' with the sample rate]
+  WSS /ws/input    ->  mouse/keyboard/gamepad and quality changes (JSON text)
 
-Os encoders so rodam quando ha >=1 ouvinte/espectador. Cada cliente tem fila
-limitada: se ficar pra tras, descarta (sem inchar latencia).
+The encoders only run while there is >=1 listener/viewer. Each client has a
+bounded queue: if it falls behind, it drops (no latency bloat).
 """
 
 import asyncio
@@ -16,33 +16,34 @@ import os
 import ssl
 import sys
 
-# Escape hatch anti-banimento: roda ANTES de carregar qualquer lib de controle
-# (evdev/uinput) ou de tela (ffmpeg). Se houver anticheat/jogo online aberto, o
-# processo é abortado aqui - as libs abaixo nem chegam a ser importadas. Ver
-# server/guardian.py e o doc ANTIBAN.md.
+# Anti-ban escape hatch: runs BEFORE loading any input (evdev/uinput) or screen
+# (ffmpeg) library. If an anti-cheat/online game is open, the process is aborted
+# here - the libraries below are never even imported. See server/guardian.py and
+# ANTIBAN.md.
 from . import guardian
+
 guardian.enforce_preflight()
 
-from aiohttp import web, WSMsgType  # noqa: E402
+from aiohttp import WSMsgType, web  # noqa: E402
 
 from . import audio, gamepad, video  # noqa: E402
-from .inject import Injector  # noqa: E402
+from .inject import Injector, NullInjector, UInputError  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 WEB_DIR = os.path.join(os.path.dirname(HERE), "web")
 
 RESET_MSG = json.dumps({"t": "reset"})
 
-# Estado UNICO de qualidade: cada nivel de video (a UI so expoe esse) arrasta o
-# audio na mesma "altura". Assim "low" deixa video + audio + transmissao leves
-# de uma vez - sem o usuario gerenciar dois controles. O canal 'aq' continua
-# existindo pra override manual/RL_AUDIO_PRESET, mas a UI nao o expoe.
+# SINGLE quality state: each video level (the only one the UI exposes) drags
+# the audio to the same "height". So "low" makes video + audio + transmission
+# light at once - without the user managing two controls. The 'aq' channel
+# still exists for a manual override/LRD_AUDIO_PRESET, but the UI does not expose it.
 AUDIO_FOR_QUALITY = {
-    "ultra":  "alta",
-    "high":   "alta",
-    "medium": "media",
-    "low":    "baixa",
-    "potato": "voz",
+    "ultra":  "high",
+    "high":   "high",
+    "medium": "medium",
+    "low":    "low",
+    "potato": "voice",
 }
 
 
@@ -93,8 +94,8 @@ class Hub:
         self.clients: set[VideoClient] = set()
         self.encoder = video.ScreenEncoder(self._on_au)
         self.preset_name = video.DEFAULT_PRESET
-        # parametros de video INDEPENDENTES: comecam do preset default mas a UI
-        # pode mexer em resolucao/fps/bitrate cada um por si (set_video).
+        # INDEPENDENT video parameters: they start from the default preset but the
+        # UI can change resolution/fps/bitrate each on its own (set_video).
         base = video.PRESETS.get(
             self.preset_name, video.PRESETS[video.DEFAULT_PRESET])
         self.settings = video.VideoSettings.from_preset(base)
@@ -104,7 +105,7 @@ class Hub:
 
     @property
     def preset(self) -> video.VideoSettings:
-        # o encoder consome os parametros atuais (duck-type com Preset).
+        # the encoder consumes the current parameters (duck-typed with Preset).
         return self.settings
 
     @property
@@ -126,7 +127,7 @@ class Hub:
                 self.encoder.start(self.preset, self.region)
                 self._running = True
                 print(f"[hub] encoder ON ({video.ENCODER}) preset={self.preset_name} "
-                      f"regiao={self.region['name']} {self.region['w']}x{self.region['h']}")
+                      f"region={self.region['name']} {self.region['w']}x{self.region['h']}")
 
     async def remove_client(self, c: VideoClient):
         async with self._lock:
@@ -134,7 +135,7 @@ class Hub:
             if not self.clients and self._running:
                 await self.encoder.stop()
                 self._running = False
-                print("[hub] encoder OFF (sem espectadores)")
+                print("[hub] encoder OFF (no viewers)")
 
     async def _restart(self):
         async with self._lock:
@@ -148,22 +149,22 @@ class Hub:
             self.encoder = video.ScreenEncoder(self._on_au)
             self.encoder.start(self.preset, self.region)
             print(f"[hub] encoder RESTART preset={self.preset_name} "
-                  f"regiao={self.region['name']} {self.region['w']}x{self.region['h']}")
+                  f"region={self.region['name']} {self.region['w']}x{self.region['h']}")
 
     async def set_preset(self, name: str):
-        # atalho: aplica os tres parametros do preset de uma vez.
-        # isinstance antes do `in`: o cliente pode mandar lista/dict (nao-hashable).
+        # shortcut: applies the preset's three parameters at once.
+        # isinstance before `in`: the client may send a list/dict (unhashable).
         if isinstance(name, str) and name in video.PRESETS:
             self.preset_name = name
             self.settings = video.VideoSettings.from_preset(video.PRESETS[name])
             await self._restart()
 
     async def set_video(self, max_h=None, fps=None, bitrate=None):
-        """Override INDEPENDENTE de resolucao/fps/bitrate (sem trocar preset).
+        """INDEPENDENT resolution/fps/bitrate override (without changing the preset).
 
-        Cada campo passa pelo saneamento do video.py: valor fora da faixa e
-        clampado e lixo (tipo errado, string sem sentido) mantem o valor atual.
-        Assim um 'vq' torto nunca derruba o encoder nem a conexao de input."""
+        Each field goes through video.py's sanitizing: an out-of-range value is
+        clamped and garbage (wrong type, meaningless string) keeps the current
+        value. So a malformed 'vq' never takes down the encoder or the input connection."""
         s = self.settings
         new = video.VideoSettings(
             max_h=video.clamp_res(max_h, s.max_h) if max_h is not None else s.max_h,
@@ -185,7 +186,7 @@ class Hub:
 
 
 class AudioClient:
-    """Um ouvinte. Fila pequena: se atrasar, descarta pacotes Opus antigos."""
+    """A listener. Small queue: if it lags, old Opus packets are dropped."""
 
     def __init__(self, ws: web.WebSocketResponse):
         self.ws = ws
@@ -195,7 +196,7 @@ class AudioClient:
         try:
             self.q.put_nowait(pkt)
         except asyncio.QueueFull:
-            # descarta o mais antigo pra manter latencia baixa
+            # drop the oldest one to keep latency low
             try:
                 self.q.get_nowait()
                 self.q.put_nowait(pkt)
@@ -209,14 +210,14 @@ class AudioClient:
 
 
 class AudioHub:
-    """Gerencia o encoder Opus e os ouvintes. Liga so com >=1 ouvinte."""
+    """Manages the Opus encoder and the listeners. Only on with >=1 listener."""
 
     def __init__(self):
         self.clients: set[AudioClient] = set()
         self.encoder = audio.AudioEncoder(self._on_pkt)
         self.preset_name = audio.DEFAULT_AUDIO_PRESET
-        # manual=True quando o usuario escolheu o audio na mao -> o preset de
-        # video ('q') para de arrastar o audio junto.
+        # manual=True when the user picked the audio by hand -> the video preset
+        # ('q') stops dragging the audio along.
         self.manual = False
         self._running = False
         self._lock = asyncio.Lock()
@@ -245,7 +246,7 @@ class AudioHub:
             if not self.clients and self._running:
                 await self.encoder.stop()
                 self._running = False
-                print("[audio] encoder OFF (sem ouvintes)")
+                print("[audio] encoder OFF (no listeners)")
 
     async def set_preset(self, name: str):
         if (isinstance(name, str) and name in audio.AUDIO_PRESETS
@@ -259,7 +260,7 @@ class AudioHub:
                     print(f"[audio] encoder RESTART preset={self.preset_name}")
 
 
-# ----------------------------- rotas -----------------------------
+# ----------------------------- routes -----------------------------
 
 async def index(request):
     return web.FileResponse(os.path.join(WEB_DIR, "index.html"))
@@ -275,7 +276,7 @@ async def api_monitors(request):
         "current_monitor": hub.monitor_index,
         "presets": list(video.PRESETS.keys()),
         "current_preset": hub.preset_name,
-        # parametros de video atuais + faixas validas pros controles separados
+        # current video parameters + valid ranges for the separate controls
         "video": {"res": s.max_h, "fps": s.fps, "bitrate": s.bitrate},
         "res_options": [360, 480, 540, 720, 900, 1080],
         "fps_options": [30, 45, 60, 90, 120],
@@ -322,19 +323,19 @@ async def ws_audio(request):
 
 
 async def api_gamepad_map_get(request):
-    """Retorna todos os perfis de remapeamento salvos (por gamepad.id)."""
+    """Returns every saved remapping profile (by gamepad.id)."""
     return web.json_response(gamepad.load_maps())
 
 
 async def api_gamepad_map_post(request):
-    """Salva o perfil de um controle. Body: {"id": "<gamepad.id>", "map": {...}}."""
+    """Saves a controller profile. Body: {"id": "<gamepad.id>", "map": {...}}."""
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "json invalido"}, status=400)
-    # JSON valido mas que nao e objeto (lista, numero, string) -> 400, nao 500.
+        return web.json_response({"error": "invalid json"}, status=400)
+    # Valid JSON that is not an object (list, number, string) -> 400, not 500.
     if not isinstance(body, dict):
-        return web.json_response({"error": "json invalido"}, status=400)
+        return web.json_response({"error": "invalid json"}, status=400)
     pad_id = body.get("id")
     mapping = body.get("map")
     try:
@@ -345,13 +346,13 @@ async def api_gamepad_map_post(request):
 
 
 async def api_gamepad_map_delete(request):
-    """Apaga o perfil de um controle. Body: {"id": "<gamepad.id>"}."""
+    """Deletes a controller profile. Body: {"id": "<gamepad.id>"}."""
     try:
         body = await request.json()
     except Exception:
-        return web.json_response({"error": "json invalido"}, status=400)
+        return web.json_response({"error": "invalid json"}, status=400)
     if not isinstance(body, dict):
-        return web.json_response({"error": "json invalido"}, status=400)
+        return web.json_response({"error": "invalid json"}, status=400)
     try:
         removed = gamepad.delete_map(body.get("id"))
     except ValueError as ex:
@@ -374,15 +375,15 @@ async def ws_input(request):
             data = json.loads(msg.data)
         except Exception:
             continue
-        # JSON valido mas sem forma de comando (lista, numero, null): ignora.
-        # Sem isso um `data.get` estoura e DERRUBA o canal de input inteiro -
-        # o usuario perde mouse/teclado ate o cliente reconectar.
+        # Valid JSON without the shape of a command (list, number, null): ignore it.
+        # Without this a `data.get` blows up and TAKES DOWN the whole input
+        # channel - the user loses mouse/keyboard until the client reconnects.
         if not isinstance(data, dict):
             continue
         t = data.get("t")
         if t == "q":
-            # atalho de preset: aplica video; o audio acompanha SO se o usuario
-            # nao tiver assumido o controle manual do audio (audio_manual).
+            # preset shortcut: applies video; the audio follows ONLY if the user
+            # has not taken manual control of the audio (audio_manual).
             preset = data.get("preset", "")
             if not isinstance(preset, str):
                 continue
@@ -390,14 +391,14 @@ async def ws_input(request):
             if not ahub.manual and preset in AUDIO_FOR_QUALITY:
                 await ahub.set_preset(AUDIO_FOR_QUALITY[preset])
         elif t == "vq":
-            # qualidade de VIDEO independente: {res, fps, bitrate} (qualquer subset)
+            # independent VIDEO quality: {res, fps, bitrate} (any subset)
             await hub.set_video(
                 max_h=data.get("res"),
                 fps=data.get("fps"),
                 bitrate=data.get("bitrate"),
             )
         elif t == "aq":
-            # qualidade de AUDIO independente: marca controle manual do audio.
+            # independent AUDIO quality: flags manual control of the audio.
             ahub.manual = True
             await ahub.set_preset(data.get("preset", ""))
         elif t == "mon":
@@ -406,18 +407,37 @@ async def ws_input(request):
                 try:
                     idx = int(idx)
                 except (TypeError, ValueError):
-                    continue          # indice invalido: ignora o comando
+                    continue          # invalid index: ignore the command
             await hub.set_monitor(idx)
         else:
             try:
                 injector.handle(data)
             except Exception as ex:
-                print(f"[input] erro: {ex}")
+                print(f"[input] error: {ex}")
     return ws
 
 
+def input_disabled() -> bool:
+    return os.environ.get("LRD_INPUT", "on").strip().lower() in ("off", "0", "false", "no")
+
+
+def make_injector():
+    """The real uinput Injector, or a NullInjector (view only) when LRD_INPUT=off
+    or when the uinput devices cannot be created. Without /dev/uinput permission
+    (or on a CI runner with no such device) the screen must still be viewable,
+    instead of the whole server failing to start."""
+    if input_disabled():
+        print("[input] LRD_INPUT=off: input injection disabled (view only)")
+        return NullInjector()
+    try:
+        return Injector()
+    except (OSError, UInputError) as ex:
+        print(f"[input] cannot create the uinput devices ({ex}): view only, no mouse/keyboard/gamepad")
+        return NullInjector()
+
+
 def build_app() -> web.Application:
-    injector = Injector()
+    injector = make_injector()
     hub = Hub(injector)
     audio_hub = AudioHub()
     app = web.Application()
@@ -440,9 +460,9 @@ def build_app() -> web.Application:
         injector.close()
     app.on_cleanup.append(on_cleanup)
 
-    # Escape hatch em runtime: se um anticheat/jogo online aparecer enquanto a
-    # ferramenta roda, derruba TUDO na hora (solta o gamepad virtual / uinput e
-    # mata o ffmpeg) e sai. Na duvida, fecha - risco de ban nao compensa.
+    # Runtime escape hatch: if an anti-cheat/online game shows up while the tool
+    # runs, take EVERYTHING down right away (release the virtual gamepad / uinput
+    # and kill ffmpeg) and exit. When in doubt, shut down - a ban is not worth it.
     async def _trip(match: guardian.Match):
         try:
             await hub.encoder.stop()
@@ -464,22 +484,22 @@ def build_app() -> web.Application:
 
 
 def main():
-    host = os.environ.get("RL_HOST", "0.0.0.0")
-    port = int(os.environ.get("RL_PORT", "8443"))
-    cert = os.environ.get("RL_CERT")
-    key = os.environ.get("RL_KEY")
+    host = os.environ.get("LRD_HOST", "0.0.0.0")
+    port = int(os.environ.get("LRD_PORT", "8443"))
+    cert = os.environ.get("LRD_CERT")
+    key = os.environ.get("LRD_KEY")
 
     ssl_ctx = None
     if cert and key and os.path.exists(cert) and os.path.exists(key):
         ssl_ctx = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         ssl_ctx.load_cert_chain(cert, key)
     else:
-        print("AVISO: sem TLS -> WebCodecs nao funciona fora de localhost.", file=sys.stderr)
+        print("WARNING: no TLS -> WebCodecs does not work outside localhost.", file=sys.stderr)
 
     app = build_app()
     scheme = "https" if ssl_ctx else "http"
-    print(f"[remote-link] video={video.ENCODER} audio={'on' if audio.audio_available() else 'off'} "
-          f"servindo em {scheme}://{host}:{port}")
+    print(f"[lan-remote-desktop] video={video.ENCODER} audio={'on' if audio.audio_available() else 'off'} "
+          f"serving on {scheme}://{host}:{port}")
     web.run_app(app, host=host, port=port, ssl_context=ssl_ctx, print=None)
 
 

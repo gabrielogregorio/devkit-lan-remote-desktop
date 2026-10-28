@@ -1,14 +1,14 @@
 """
-Captura de tela + encode H.264 por hardware e fatiamento em Access Units (AU)
-prontos para o WebCodecs do navegador.
+Screen capture + hardware H.264 encoding and slicing into Access Units (AU)
+ready for the browser's WebCodecs.
 
-Encoder escolhido automaticamente: NVENC (NVIDIA) > VAAPI (Intel/AMD) > x264 (CPU).
+Encoder picked automatically: NVENC (NVIDIA) > VAAPI (Intel/AMD) > x264 (CPU).
 
 Pipeline (NVENC):
     x11grab -> [scale CPU] -> h264_nvenc (ull) -> bsf aud=insert -> pipe:1 (Annex-B)
 
-Cada AU comeca com um delimitador AUD (NAL type 9), entao o fatiamento e trivial
-e cada AU vira um EncodedVideoChunk no cliente.
+Each AU starts with an AUD delimiter (NAL type 9), so slicing is trivial and
+each AU becomes an EncodedVideoChunk on the client.
 """
 
 import asyncio
@@ -18,12 +18,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-RENDER_NODE = os.environ.get("RL_RENDER_NODE", "/dev/dri/renderD128")
+RENDER_NODE = os.environ.get("LRD_RENDER_NODE", "/dev/dri/renderD128")
 
 
 def detect_encoder() -> str:
-    """Melhor encoder H.264 disponivel: nvenc > vaapi > x264."""
-    forced = os.environ.get("RL_ENCODER")
+    """Best available H.264 encoder: nvenc > vaapi > x264."""
+    forced = os.environ.get("LRD_ENCODER")
     if forced:
         return forced
     try:
@@ -46,23 +46,23 @@ ENCODER = detect_encoder()
 @dataclass
 class Preset:
     name: str
-    max_h: int      # altura maxima de saida (escala pra baixo, nunca pra cima)
+    max_h: int      # maximum output height (scales down, never up)
     fps: int
-    bitrate: str    # ex.: "15M"
+    bitrate: str    # e.g. "15M"
 
     @property
     def gop(self) -> int:
-        # GOP ~1s: o keyframe e o frame mais pesado, mas na LAN banda sobra e o
-        # que importa e o cliente novo (e cada ressync apos erro/reset) NAO ficar
-        # com tela preta esperando o proximo IDR. 1s e o equilibrio: ressync
-        # rapido sem picos exagerados.
+        # GOP ~1s: the keyframe is the heaviest frame, but on the LAN bandwidth is
+        # plentiful and what matters is that a new client (and every resync after
+        # an error/reset) does NOT sit on a black screen waiting for the next IDR.
+        # 1s is the balance: fast resync without exaggerated spikes.
         return max(2, self.fps)
 
 
 @dataclass
 class VideoSettings:
-    """Parametros de video INDEPENDENTES (resolucao, fps, bitrate). A UI pode
-    mexer em cada um sozinho; os presets sao so atalhos que preenchem os tres."""
+    """INDEPENDENT video parameters (resolution, fps, bitrate). The UI can change
+    each one alone; the presets are only shortcuts that fill in all three."""
     max_h: int
     fps: int
     bitrate: str
@@ -78,7 +78,7 @@ class VideoSettings:
 
 
 def _kbps(bitrate: str) -> int:
-    """'12M'/'3500k'/'1200' -> kbps inteiro (pra calcular bufsize)."""
+    """'12M'/'3500k'/'1200' -> integer kbps (to compute the bufsize)."""
     s = str(bitrate).strip().lower()
     try:
         if s.endswith("m"):
@@ -87,21 +87,21 @@ def _kbps(bitrate: str) -> int:
             return int(float(s[:-1]))
         return int(float(s) / 1000)
     except (ValueError, OverflowError):
-        # inf/NaN/lixo -> bitrate padrao (o VBV so precisa de um numero sao)
+        # inf/NaN/garbage -> default bitrate (the VBV only needs a sane number)
         return 8000
 
 
 def _lowlat_bufsize(bitrate: str) -> str:
-    """VBV pequeno (~1 frame de margem) p/ CBR de baixa latencia: o encoder nao
-    deixa o bitrate "estourar" num frame so e segura os picos que travam o
-    decoder. Usamos ~1/3 do bitrate/s (acima de 1 frame, abaixo de 1s)."""
+    """Small VBV (~1 frame of headroom) for low-latency CBR: the encoder does not
+    let the bitrate "burst" in a single frame and holds back the spikes that stall
+    the decoder. We use ~1/3 of the bitrate/s (above 1 frame, below 1s)."""
     return f"{max(500, _kbps(bitrate) // 3)}k"
 
 
-# Faixas aceitas no canal 'vq' (qualidade de video vinda do cliente). O cliente
-# e LAN aberta: um valor absurdo ou com tipo errado nao pode virar uma linha de
-# comando de ffmpeg impossivel (encoder morre em loop e a tela fica preta).
-# Aqui a regra e simples: clampa o que da pra clampar, ignora o que e lixo.
+# Ranges accepted on the 'vq' channel (video quality coming from the client). The
+# client is an open LAN: an absurd value or a wrong type must not turn into an
+# impossible ffmpeg command line (the encoder dies in a loop and the screen goes
+# black). The rule here is simple: clamp what can be clamped, ignore garbage.
 RES_MIN, RES_MAX = 144, 2160
 FPS_MIN, FPS_MAX = 5, 240
 BITRATE_MIN_KBPS, BITRATE_MAX_KBPS = 100, 100_000
@@ -109,8 +109,8 @@ _BITRATE_RE = re.compile(r"^\d+(?:\.\d+)?[kKmM]?$")
 
 
 def clamp_res(value, fallback: int) -> int:
-    """Altura de saida valida (ou o valor atual, se o cliente mandou lixo).
-    OverflowError cobre inf; ValueError cobre NaN e string sem numero."""
+    """Valid output height (or the current value, if the client sent garbage).
+    OverflowError covers inf; ValueError covers NaN and strings with no number."""
     try:
         v = int(value)
     except (TypeError, ValueError, OverflowError):
@@ -127,10 +127,10 @@ def clamp_fps(value, fallback: int) -> int:
 
 
 def clean_bitrate(value, fallback: str) -> str:
-    """Aceita so o formato que o ffmpeg entende ('12M', '3500k', '800000') E
-    que faz sentido como taxa. So a forma nao basta: '1.55' casa no regex mas
-    quer dizer 1,5 bit/s - o encoder aceitaria e cuspiria lixo. Fora da faixa
-    util (100 kbps a 100 Mbps) mantem o valor atual."""
+    """Accepts only the format ffmpeg understands ('12M', '3500k', '800000') AND
+    that makes sense as a rate. The shape alone is not enough: '1.55' matches the
+    regex but means 1.5 bit/s - the encoder would accept it and spit garbage.
+    Outside the useful range (100 kbps to 100 Mbps) the current value is kept."""
     if isinstance(value, bool) or not isinstance(value, (str, int, float)):
         return fallback
     s = str(value).strip()
@@ -139,22 +139,22 @@ def clean_bitrate(value, fallback: str) -> str:
     return s if BITRATE_MIN_KBPS <= _kbps(s) <= BITRATE_MAX_KBPS else fallback
 
 
-# Escala UNICA de qualidade (a UI manda 1 nivel; o audio segue junto - ver
-# main.AUDIO_FOR_QUALITY). max_h limita a ALTURA de saida: como a fonte costuma
-# ser 1080p, pedir 2160 nao "sobe" nada (so faz ultra == high). Por isso o topo
-# fica em 1080p nativo e o que abre a faixa de verdade e descer a resolucao +
-# bitrate ate o chao (360p/1.2M) - diferenca que da pra PERCEBER no celular,
-# decodifica facil (menos lag) e segura 60fps em device fraco.
-# fps fica em 60 ate "low" (leve POReM suave); so "potato" cai pra 30 (piso real
-# pra rede ruim, metade dos pacotes).
+# SINGLE quality scale (the UI sends 1 level; the audio follows along - see
+# main.AUDIO_FOR_QUALITY). max_h caps the output HEIGHT: since the source is
+# usually 1080p, asking for 2160 does not "raise" anything (it only makes
+# ultra == high). That is why the top stays at native 1080p and what really
+# widens the range is lowering resolution + bitrate down to the floor (360p/1.2M) -
+# a difference you can NOTICE on the phone, decodes easily (less lag) and holds
+# 60fps on a weak device. fps stays at 60 down to "low" (light BUT smooth); only
+# "potato" drops to 30 (the real floor for a bad network, half the packets).
 PRESETS = {
-    "ultra":  Preset("ultra",  1080, 60, "25M"),    # 1080p nitido (teto da fonte)
+    "ultra":  Preset("ultra",  1080, 60, "25M"),    # sharp 1080p (the source ceiling)
     "high":   Preset("high",    900, 60, "12M"),
     "medium": Preset("medium",  720, 60, "7M"),
-    "low":    Preset("low",     540, 60, "3500k"),   # leve e ainda 60fps
-    "potato": Preset("potato",  360, 30, "1200k"),   # piso: celular/rede fraca
+    "low":    Preset("low",     540, 60, "3500k"),   # light and still 60fps
+    "potato": Preset("potato",  360, 30, "1200k"),   # floor: phone/weak network
 }
-DEFAULT_PRESET = os.environ.get("RL_PRESET", "high")
+DEFAULT_PRESET = os.environ.get("LRD_PRESET", "high")
 
 _MON_RE = re.compile(
     r"^\s*(\d+):\s+\+(\*)?(\S+)\s+(\d+)/\d+x(\d+)/\d+\+(\d+)\+(\d+)"
@@ -163,14 +163,14 @@ _MON_RE = re.compile(
 
 def _x_env() -> dict:
     env = dict(os.environ)
-    env.setdefault("DISPLAY", os.environ.get("RL_DISPLAY", ":0"))
-    if "RL_XAUTHORITY" in os.environ:
-        env["XAUTHORITY"] = os.environ["RL_XAUTHORITY"]
+    env.setdefault("DISPLAY", os.environ.get("LRD_DISPLAY", ":0"))
+    if "LRD_XAUTHORITY" in os.environ:
+        env["XAUTHORITY"] = os.environ["LRD_XAUTHORITY"]
     return env
 
 
 def get_monitors() -> list[dict]:
-    """Lista os monitores via `xrandr --listmonitors`."""
+    """Lists the monitors through `xrandr --listmonitors`."""
     try:
         out = subprocess.run(
             ["xrandr", "--listmonitors"],
@@ -192,7 +192,7 @@ def get_monitors() -> list[dict]:
 
 
 def virtual_screen() -> tuple[int, int]:
-    """Bounding box de toda a area de trabalho X (todos os monitores)."""
+    """Bounding box of the whole X desktop (all monitors)."""
     mons = get_monitors()
     if not mons:
         return (1920, 1080)
@@ -202,7 +202,7 @@ def virtual_screen() -> tuple[int, int]:
 
 
 def pick_region(monitor_index: int | None) -> dict:
-    """Regiao de captura: um monitor especifico, ou o primario por padrao."""
+    """Capture region: a specific monitor, or the primary one by default."""
     mons = get_monitors()
     if not mons:
         return {"name": "screen", "w": 1920, "h": 1080, "x": 0, "y": 0}
@@ -217,14 +217,14 @@ def pick_region(monitor_index: int | None) -> dict:
 
 
 class ScreenEncoder:
-    """Roda o ffmpeg e entrega AUs (bytes) via callback async."""
+    """Runs ffmpeg and delivers AUs (bytes) through an async callback."""
 
     def __init__(self, on_au):
         self._on_au = on_au          # callback(is_key: bool, au: bytes)
         self.proc: asyncio.subprocess.Process | None = None
         self._task: asyncio.Task | None = None
         self._stop = False
-        self._low_power = True       # VAAPI low-power = menor latencia
+        self._low_power = True       # VAAPI low-power = lower latency
 
     def _build_cmd(self, preset: Preset, region: dict) -> list[str]:
         display = _x_env().get("DISPLAY", ":0")
@@ -251,11 +251,11 @@ class ScreenEncoder:
                 "-rc", "cbr", "-b:v", preset.bitrate, "-maxrate", preset.bitrate,
                 "-bufsize", bufsize,
                 "-g", str(preset.gop), "-bf", "0",
-                # spatial AQ: melhora a nitidez percebida pro MESMO bitrate (ajuda
-                # a rodar num bitrate menor, que e o que o decoder do browser pede).
+                # spatial AQ: improves perceived sharpness for the SAME bitrate (helps
+                # run at a lower bitrate, which is what the browser decoder asks for).
                 "-spatial-aq", "1", "-aq-strength", "8",
-                # GOP fixo (sem scenecut) -> keyframes previsiveis; forced-idr p/
-                # o reset/ressync do cliente sempre cair num IDR de verdade.
+                # fixed GOP (no scenecut) -> predictable keyframes; forced-idr so the
+                # client's reset/resync always lands on a real IDR.
                 "-no-scenecut", "1", "-forced-idr", "1",
                 "-profile:v", "high", "-delay", "0", "-zerolatency", "1",
                 "-pix_fmt", "yuv420p",
@@ -274,7 +274,7 @@ class ScreenEncoder:
             ]
             if self._low_power:
                 cmd += ["-low_power", "1"]
-        else:  # x264 software (fallback universal)
+        else:  # x264 software (universal fallback)
             if scale_down:
                 cmd += ["-vf", f"scale=-2:{preset.max_h}"]
             cmd += [
@@ -282,7 +282,7 @@ class ScreenEncoder:
                 "-b:v", preset.bitrate, "-maxrate", preset.bitrate,
                 "-bufsize", bufsize,
                 "-g", str(preset.gop), "-bf", "0",
-                # nal-hrd cbr + sliced threads: latencia menor no software tambem.
+                # nal-hrd cbr + sliced threads: lower latency in software too.
                 "-x264-params", "nal-hrd=cbr:sliced-threads=1:sync-lookahead=0",
                 "-profile:v", "high", "-pix_fmt", "yuv420p",
             ]
@@ -377,7 +377,7 @@ class ScreenEncoder:
 
 
 def _is_keyframe(au: bytes) -> bool:
-    """AU contem IDR (NAL 5) ou SPS (NAL 7)?"""
+    """Does the AU contain an IDR (NAL 5) or SPS (NAL 7)?"""
     i = 0
     while True:
         sc = au.find(b"\x00\x00\x01", i)
