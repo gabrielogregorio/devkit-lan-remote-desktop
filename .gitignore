@@ -1,15 +1,24 @@
+# python
 .venv/
-certs/
+venv/
 __pycache__/
 *.pyc
-
-# testes (Parte A - Python)
 .pytest_cache/
+.ruff_cache/
 .coverage
 htmlcov/
 
-# testes (Parte B - web: Vitest/Playwright)
+# web tests (vitest / playwright)
 node_modules/
 coverage/
 playwright-report/
 test-results/
+
+# runtime: the self-signed TLS pair (private key) is made by ./run.sh
+certs/
+
+# local scratch
+*.log
+tmp/
+trash/
+dist/

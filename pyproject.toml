@@ -1,0 +1,53 @@
+[project]
+name = "devkit-lan-remote-desktop"
+version = "1.0.0"
+description = "The Ubuntu PC screen on any device of the local network through the browser, with mouse, keyboard and Xbox gamepad control: aiohttp server, hardware H.264 over WebCodecs, Opus audio and /dev/uinput input"
+requires-python = "==3.12.*"
+dependencies = [
+    "aiohttp==3.13.5",
+    "evdev==1.9.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest==9.0.3",
+    "pytest-asyncio==1.4.0",
+    "pytest-aiohttp==1.1.0",
+    "pytest-cov==7.1.0",
+    "ruff==0.16.4",
+]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.coverage.run]
+source = ["server"]
+branch = true
+
+[tool.coverage.report]
+show_missing = true
+fail_under = 100
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.:",
+]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+extend-exclude = ["node_modules"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "B", "I", "UP"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["server", "tests"]
+
+[tool.uv]
+# "Virtual" project: not an installable package, only scripts (server/, run.sh).
+# uv manages the dependencies only. Never re-resolve implicitly; bump deps explicitly with:
+#   uv lock --upgrade-package <pkg>==<new-ver>
+package = false
+upgrade = false
