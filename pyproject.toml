@@ -1,6 +1,6 @@
 [project]
 name = "devkit-lan-remote-desktop"
-version = "1.1.0"
+version = "1.1.1"
 description = "The Ubuntu PC screen on any device of the local network through the browser, with mouse, keyboard and Xbox gamepad control: aiohttp server, hardware H.264 over WebCodecs, Opus audio and /dev/uinput input"
 requires-python = "==3.12.*"
 dependencies = [
