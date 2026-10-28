@@ -1,9 +1,19 @@
-/* remote-link client
-   vídeo: WebSocket binário -> Access Units H.264 -> WebCodecs VideoDecoder -> canvas
-   áudio: WebSocket binário -> pacotes Opus -> WebCodecs AudioDecoder -> AudioContext
-   input: mouse/teclado/gamepad -> WebSocket texto JSON
+/* LAN Remote Desktop client
+   video: binary WebSocket -> H.264 Access Units -> WebCodecs VideoDecoder -> canvas
+   audio: binary WebSocket -> Opus packets -> WebCodecs AudioDecoder -> AudioContext
+   input: mouse/keyboard/gamepad -> text WebSocket JSON
+   strings: English in the code, pt-BR from i18n.js (loaded before this file)
 */
 "use strict";
+
+// i18n.js is a global (`I18N`) in the browser and a CommonJS module under vitest.
+const I18N =
+  typeof module !== "undefined" && module.exports ? require("./i18n.js") : window.I18N;
+const LANG = I18N.detectLanguage(
+  location.search,
+  navigator.languages || [navigator.language],
+);
+const t = I18N.translator(LANG);
 
 const $ = (id) => document.getElementById(id);
 const canvas = $("screen");
@@ -16,7 +26,7 @@ let videoWS = null,
 let decoder = null,
   configured = false,
   configuring = false,
-  needKey = true, // 1º chunk após configure()/reset TEM que ser keyframe
+  needKey = true, // the 1st chunk after configure()/reset MUST be a keyframe
   codecStr = null;
 let tsCounter = 0;
 let frames = 0,
@@ -25,7 +35,7 @@ let frames = 0,
 let lastFrameAt = 0,
   decodeLatency = 0;
 
-// ---------- WebCodecs (vídeo) ----------
+// ---------- WebCodecs (video) ----------
 function hex2(n) {
   return n.toString(16).padStart(2, "0");
 }
@@ -85,10 +95,10 @@ function resetDecoder() {
   decoder = null;
 }
 
-// Chrome no Linux costuma falhar com hardwareAcceleration:"prefer-hardware"
-// (caminho VA-API/NVDEC instável) onde Firefox aceita. Então sondamos com
-// isConfigSupported() e caímos pra "no-preference" -> "prefer-software". A
-// configuração roda async; bufferizamos o 1º keyframe até o decoder ficar pronto.
+// Chrome on Linux often fails with hardwareAcceleration:"prefer-hardware"
+// (unstable VA-API/NVDEC path) where Firefox accepts it. So we probe with
+// isConfigSupported() and fall back to "no-preference" -> "prefer-software".
+// Configuration is async; the 1st keyframe waits until the decoder is ready.
 async function configureDecoder(codec) {
   const bases = [
     { hardwareAcceleration: "prefer-hardware" },
@@ -110,11 +120,11 @@ async function configureDecoder(codec) {
       decoder.configure(sup.config || cfg);
       return true;
     } catch (e) {
-      console.warn("configure falhou em", extra.hardwareAcceleration, e);
+      console.warn("configure failed with", extra.hardwareAcceleration, e);
       resetDecoder();
     }
   }
-  setStatus("este navegador não conseguiu iniciar o decoder H.264");
+  setStatus(t("this browser could not start the H.264 decoder"));
   return false;
 }
 
@@ -125,7 +135,7 @@ function onAU(buf) {
   const isKey = nals.some((n) => n.type === 5 || n.type === 7);
 
   if (!configured) {
-    if (configuring) return; // sondagem async em andamento; espera o próximo keyframe
+    if (configuring) return; // async probe in progress; wait for the next keyframe
     const sps = nals.find((n) => n.type === 7);
     if (!sps) return;
     codecStr = codecFromSPS(au, sps.hdr);
@@ -133,15 +143,15 @@ function onAU(buf) {
     configureDecoder(codecStr).then((ok) => {
       configuring = false;
       configured = ok;
-      needKey = true; // só começa a decodificar no próximo keyframe
+      needKey = true; // decoding only starts at the next keyframe
     });
-    return; // este AU serve só pra configurar; o próximo keyframe começa o decode
+    return; // this AU only configures; the next keyframe starts decoding
   }
 
-  // O VideoDecoder EXIGE que o 1º chunk após configure()/flush seja keyframe.
-  // Como a config é assíncrona e o GOP é longo, os AUs que chegam logo depois
-  // costumam ser delta -> descarta até cair um keyframe (senão dá erro
-  // "key frame is required" no Firefox e no Chrome).
+  // VideoDecoder REQUIRES the 1st chunk after configure()/flush to be a keyframe.
+  // Since configuration is async and the GOP is long, the AUs that arrive right
+  // after are usually delta -> drop them until a keyframe shows up (otherwise
+  // Firefox and Chrome throw "key frame is required").
   if (needKey) {
     if (!isKey) return;
     needKey = false;
@@ -156,23 +166,23 @@ function onAU(buf) {
       }),
     );
   } catch (e) {
-    console.warn("decode falhou, ressync", e);
+    console.warn("decode failed, resyncing", e);
     resetDecoder();
   }
 }
 
-// ---------- WebCodecs (áudio) ----------
+// ---------- WebCodecs (audio) ----------
 const AUDIO_SR = 48000,
   AUDIO_CH = 2;
 let audioWS = null,
   audioCtx = null,
   audioDecoder = null;
-let audioOn = false; // usuário quer som?
-let playHead = 0; // relógio de agendamento (s)
+let audioOn = false; // does the user want sound?
+let playHead = 0; // scheduling clock (s)
 let audioTs = 0;
 let audioBytes = 0,
   audioPkts = 0;
-const JITTER = 0.06; // buffer alvo (s) - equilíbrio latência × estabilidade
+const JITTER = 0.06; // target buffer (s) - latency vs stability trade-off
 
 function startAudioContext() {
   if (!audioCtx) {
@@ -232,8 +242,8 @@ function playAudio(data) {
   src.connect(audioCtx.destination);
 
   const now = audioCtx.currentTime;
-  // reancora se atrasou (playHead no passado) OU se o buffer agendado cresceu
-  // demais (rajada acumulou latencia) -> mantém tempo real, sem deixar empilhar.
+  // re-anchor if we fell behind (playHead in the past) OR if the scheduled buffer
+  // grew too much (a burst piled up latency) -> stay real time, never stack up.
   if (playHead < now + 0.005 || playHead > now + JITTER + 0.12) {
     playHead = now + JITTER;
   }
@@ -248,14 +258,14 @@ function onAudioPacket(arrbuf) {
   try {
     audioDecoder.decode(
       new EncodedAudioChunk({
-        type: "key", // cada pacote Opus é decodificável de forma independente
+        type: "key", // every Opus packet decodes on its own
         timestamp: audioTs,
         data: arrbuf,
       }),
     );
-    audioTs += 20000; // 20ms por frame (µs)
+    audioTs += 20000; // 20ms per frame (µs)
   } catch (e) {
-    console.warn("audio decode falhou", e);
+    console.warn("audio decode failed", e);
     resetAudioDecoder();
   }
 }
@@ -282,12 +292,12 @@ function setAudio(on) {
   audioOn = on;
   const btn = $("sound");
   if (on) {
-    btn.textContent = "🔊 som";
+    btn.textContent = t("🔊 sound");
     btn.classList.add("on");
     startAudioContext();
     if (!audioWS) connectAudio();
   } else {
-    btn.textContent = "🔇 som";
+    btn.textContent = t("🔇 sound");
     btn.classList.remove("on");
     if (audioWS) {
       try {
@@ -300,7 +310,7 @@ function setAudio(on) {
   }
 }
 
-// ---------- conexão ----------
+// ---------- connection ----------
 function connect() {
   $("overlay").classList.add("hidden");
   connectInput();
@@ -321,7 +331,7 @@ function connectVideo() {
   };
   videoWS.onclose = () => {
     resetDecoder();
-    setStatus("vídeo desconectado - reconectando…");
+    setStatus(t("video disconnected - reconnecting…"));
     setTimeout(() => {
       if (document.visibilityState === "visible") connectVideo();
     }, 1000);
@@ -348,10 +358,10 @@ function flushMove() {
   requestAnimationFrame(flushMove);
 }
 
-// Retângulo REAL onde o vídeo é desenhado dentro do <canvas>. Como o canvas usa
-// object-fit:contain pra ocupar a tela toda, pode sobrar barra preta (ex.: a
-// fonte é 16:9 e o celular está em pé). O mouse tem que mapear pra esse rect, não
-// pro elemento inteiro, senão clicar/mover erra na proporção da barra.
+// The REAL rectangle where the video is drawn inside the <canvas>. Since the
+// canvas uses object-fit:contain to fill the screen, black bars may be left (e.g.
+// the source is 16:9 and the phone is upright). The mouse has to map to this
+// rect, not to the whole element, or clicks/moves miss by the size of the bar.
 function displayedRect() {
   const r = canvas.getBoundingClientRect();
   const bw = canvas.width || r.width;
@@ -406,7 +416,7 @@ canvas.addEventListener(
   { passive: false },
 );
 
-// ---------- toque (mobile): tap = clique, arraste = mover ----------
+// ---------- touch (mobile): tap = click, drag = move ----------
 let touchId = null,
   touchMoved = false;
 canvas.addEventListener(
@@ -448,17 +458,18 @@ canvas.addEventListener(
   { passive: false },
 );
 
-// ---------- teclado ----------
-// Captura SÓ com foco no canvas: clicar na tela remota manda o teclado físico
-// pro PC; clicar fora (ou Esc-do-foco) devolve o controle ao navegador local.
-// Assim Tab/F-keys/atalhos não vazam pro browser enquanto você está "dentro".
+// ---------- keyboard ----------
+// Capture ONLY while the canvas has focus: clicking the remote screen sends the
+// physical keyboard to the PC; clicking outside (or leaving focus) hands control
+// back to the local browser. So Tab/F-keys/shortcuts don't leak into the browser
+// while you are "inside".
 let kbdCapture = false;
-canvas.tabIndex = 0; // permite foco/blur no canvas
+canvas.tabIndex = 0; // allows focus/blur on the canvas
 
 function setKbdCapture(on) {
   kbdCapture = on;
   document.body.classList.toggle("kbd-capture", on);
-  if (on) setStatus("teclado capturado - clique fora p/ liberar");
+  if (on) setStatus(t("keyboard captured - click outside to release"));
 }
 canvas.addEventListener("focus", () => setKbdCapture(true));
 canvas.addEventListener("blur", () => setKbdCapture(false));
@@ -468,7 +479,7 @@ window.addEventListener(
   "keydown",
   (e) => {
     if (!kbdCapture || !inputWS || inputWS.readyState !== 1) return;
-    // F11 fica reservado ao fullscreen do navegador local; nunca enviado.
+    // F11 stays reserved for the local browser's fullscreen; never sent.
     if (e.code === "F11") return;
     e.preventDefault();
     sendInput({ t: "k", code: e.code, down: true });
@@ -486,9 +497,9 @@ window.addEventListener(
   true,
 );
 
-// ---------- combos / teclado virtual ----------
-// Envia uma sequência de teclas como um chord: aperta todas em ordem, solta na
-// ordem inversa. Não depende de atalho local (não colide com Win/Ubuntu/celular).
+// ---------- combos / virtual keyboard ----------
+// Sends a key sequence as a chord: presses all in order, releases in reverse
+// order. Needs no local shortcut (doesn't clash with Win/Ubuntu/phone).
 function sendChord(codes) {
   for (const c of codes) sendInput({ t: "k", code: c, down: true });
   for (let i = codes.length - 1; i >= 0; i--)
@@ -506,7 +517,7 @@ const COMBOS = {
 };
 
 // ---------- gamepad ----------
-// Ordem lógica Xbox que o servidor espera em b[] (índices standard):
+// Logical Xbox order the server expects in b[] (standard indices):
 // 0=A 1=B 2=X 3=Y 4=LB 5=RB 6=LT 7=RT 8=Back 9=Start 10=LS 11=RS
 // 12=DPup 13=DPdown 14=DPleft 15=DPright 16=Guide. a[]=[lx,ly,rx,ry].
 const PAD_BUTTONS = [
@@ -525,47 +536,47 @@ async function loadGamepadMaps() {
   }
 }
 
-// Gatilho FIEL: replica o valor cru 0..1 do controle, sem deadzone/rescale/
-// quantização. Distorcer (como antes) é o que gerava o "double click": a
-// deadzone/limiar oscilava perto da borda e cada cruzamento virava
-// apertar/soltar. O servidor faz round(v*255) -> ABS_Z; evdev já deduplica
-// valores iguais, então não há jitter a "suavizar". Só clampa em [0,1].
+// FAITHFUL trigger: replicates the controller's raw 0..1 value, with no
+// deadzone/rescale/quantization. Distorting it (as before) is what caused the
+// "double click": the deadzone/threshold flickered near the edge and every
+// crossing became press/release. The server does round(v*255) -> ABS_Z; evdev
+// already dedups equal values, so there is no jitter to "smooth". Only clamps to [0,1].
 function clamp01(v) {
-  if (!(v >= 0)) return 0; // NaN/negativo/undefined -> solto
+  if (!(v >= 0)) return 0; // NaN/negative/undefined -> released
   return v > 1 ? 1 : v;
 }
 
-// Número utilizável ou o padrão. Um controle "pirata" (ou um driver estranho)
-// pode entregar undefined/NaN/Infinity num eixo ou botão; deixar isso passar
-// vira NaN no JSON -> null no servidor -> eixo/gatilho maluco.
+// A usable number or the default. A knock-off controller (or an odd driver)
+// may report undefined/NaN/Infinity on an axis or button; letting it through
+// becomes NaN in the JSON -> null on the server -> crazy axis/trigger.
 function padNum(v, fallback = 0) {
   return typeof v === "number" && Number.isFinite(v) ? v : fallback;
 }
 
-// lê um source de gatilho/eixo do perfil: {src:"axis",i,min,max} ou {src:"button",i}
+// reads a trigger/axis source from the profile: {src:"axis",i,min,max} or {src:"button",i}
 function readSource(p, s) {
   if (!s) return 0;
   if (s.src === "button") {
     const btn = Array.isArray(p.buttons) ? p.buttons[s.i] : null;
     return btn ? clamp01(padNum(btn.value)) : 0;
   }
-  // eixo: normaliza de [min(repouso)..max(pressionado)] pra 0..1. Suporta eixo
-  // invertido (max < min) porque o controle PS2/USB pode ir de 0 a -1.
+  // axis: normalizes [min(rest)..max(pressed)] to 0..1. Supports an inverted
+  // axis (max < min) because a PS2/USB controller may go from 0 to -1.
   const v = Array.isArray(p.axes) ? p.axes[s.i] : undefined;
-  // só número finito vale: ausente/NaN/lixo -> solto (0). Cuidado: NÃO dá pra
-  // "converter pra 0 e normalizar", porque 0 num eixo -1..1 vira meio apertado.
+  // only a finite number counts: missing/NaN/garbage -> released (0). Careful: you
+  // CAN'T "turn it into 0 and normalize", because 0 on a -1..1 axis is half pressed.
   if (typeof v !== "number" || !Number.isFinite(v)) return 0;
   const min = padNum(s.min, -1), max = padNum(s.max, 1);
   const span = max - min;
-  if (Math.abs(span) < 1e-6) return 0; // calibração degenerada -> trata solto
+  if (Math.abs(span) < 1e-6) return 0; // degenerate calibration -> treat as released
   return Math.min(1, Math.max(0, (v - min) / span));
 }
 
-// Passagem DIRETA: o navegador já entrega o controle na ordem padrão W3C
-// ("standard mapping"). Pra um Xbox isso é exatamente a ordem que o servidor
-// quer (b[0]=A..b[16]=Guide, a[0..3]=sticks, b[6]/b[7]=gatilhos analógicos).
-// Então repassamos byte a byte, sem mexer. É o caminho de QUALQUER controle
-// que o browser reconheça (Xbox, DualShock, etc.).
+// STRAIGHT passthrough: the browser already reports the controller in the W3C
+// standard order ("standard mapping"). For an Xbox that is exactly the order the
+// server wants (b[0]=A..b[16]=Guide, a[0..3]=sticks, b[6]/b[7]=analog triggers).
+// So we forward it as is, untouched. It is the path of ANY controller the
+// browser recognizes (Xbox, DualShock, etc.).
 function passthroughPad(p) {
   const ax = Array.isArray(p.axes) ? p.axes : [];
   const btns = Array.isArray(p.buttons) ? p.buttons : [];
@@ -579,15 +590,15 @@ function passthroughPad(p) {
   return { a, b, lt, rt };
 }
 
-// Traduz o pad bruto -> formato padrão.
-// REGRA: controle "standard" (Xbox e a maioria) passa DIRETO, sem perfil nenhum
-// (um Xbox jamais precisa de remap). Só controle NÃO-standard (PS2/USB clone)
-// usa o perfil de remap salvo - e mesmo assim, só se existir.
+// Translates the raw pad -> standard format.
+// RULE: a "standard" controller (Xbox and most others) passes STRAIGHT through,
+// with no profile at all (an Xbox never needs a remap). Only a NON-standard
+// controller (PS2/USB clone) uses the saved remap profile - and only if one exists.
 function mapPad(p) {
   if (p.mapping === "standard") return passthroughPad(p);
   const m = padMaps[p.id];
-  if (!m) return passthroughPad(p); // sem perfil: melhor esforço (passa direto)
-  // com perfil (não-standard): monta b[] na ordem lógica a partir dos índices
+  if (!m) return passthroughPad(p); // no profile: best effort (straight through)
+  // with a profile (non-standard): builds b[] in logical order from the indices
   const b = PAD_BUTTONS.map((name) => {
     const idx = m.buttons?.[name];
     const btn = idx != null && Array.isArray(p.buttons) ? p.buttons[idx] : null;
@@ -607,9 +618,9 @@ function mapPad(p) {
 
 let padSnap = "";
 function pollPads() {
-  // try/catch em TUDO (inclusive o getGamepads): se algo escapar daqui, o
-  // requestAnimationFrame do fim não roda e o polling MORRE pro resto da
-  // sessão - o controle simplesmente para de funcionar sem nenhum aviso.
+  // try/catch around EVERYTHING (getGamepads included): if anything escapes
+  // here, the requestAnimationFrame at the end never runs and polling DIES for
+  // the rest of the session - the controller just stops working, silently.
   try {
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     let p = null;
@@ -620,11 +631,11 @@ function pollPads() {
       }
     if (p && !remapState.active) {
       const { a, b, lt, rt } = mapPad(p);
-      // Dedup na RESOLUÇÃO DO DESTINO: o servidor escreve eixo como int16 e
-      // botão/gatilho como byte 0..255, e o evdev descarta valor repetido.
-      // Então comparar o valor cru (float) reenviaria a cada micro-ruído do
-      // controle - tráfego e CPU à toa, 60x/s. O que VAI no fio continua sendo
-      // o valor fiel; só a comparação é quantizada.
+      // Dedup at the DESTINATION RESOLUTION: the server writes an axis as int16
+      // and a button/trigger as a 0..255 byte, and evdev drops repeated values.
+      // So comparing the raw float would resend on every bit of controller
+      // micro-noise - wasted traffic and CPU, 60x/s. What GOES on the wire is
+      // still the faithful value; only the comparison is quantized.
       const ltByte = Math.round(lt * 255), rtByte = Math.round(rt * 255);
       const snap = JSON.stringify([
         a.map((v) => Math.round(v * 32767)),
@@ -642,13 +653,13 @@ function pollPads() {
   requestAnimationFrame(pollPads);
 }
 window.addEventListener("gamepadconnected", (e) => {
-  setStatus(`controle: ${e.gamepad.id.slice(0, 28)}`);
+  setStatus(t("controller: {id}", { id: e.gamepad.id.slice(0, 28) }));
 });
 
-// ---------- remapeamento de gamepad ----------
-// Fluxo "aperte o botão X": pra cada controle lógico, captura qual botão/eixo
-// bruto do pad foi acionado. Pensado pros controles PS2/USB com mapping caótico.
-// Cada passo: nome lógico + se é botão, eixo (stick) ou gatilho.
+// ---------- gamepad remapping ----------
+// "Press button X" flow: for each logical control, captures which raw pad
+// button/axis was pressed. Meant for PS2/USB controllers with chaotic mappings.
+// Each step: logical name + whether it is a button, an axis (stick) or a trigger.
 const REMAP_STEPS = [
   ...PAD_BUTTONS.filter((n) => n !== "lt" && n !== "rt")
     .map((n) => ({ kind: "button", name: n })),
@@ -658,14 +669,14 @@ const REMAP_STEPS = [
   { kind: "axis", name: "rx" }, { kind: "axis", name: "ry" },
 ];
 const STEP_LABEL = {
-  a: "A", b: "B", x: "X", y: "Y", lb: "LB (ombro esq.)", rb: "RB (ombro dir.)",
-  back: "Back/Select", start: "Start", ls: "L3 (clicar stick esq.)",
-  rs: "R3 (clicar stick dir.)", guide: "Guide/Home (ou pule)",
+  a: "A", b: "B", x: "X", y: "Y", lb: t("LB (left bumper)"), rb: t("RB (right bumper)"),
+  back: "Back/Select", start: "Start", ls: t("L3 (click left stick)"),
+  rs: t("R3 (click right stick)"), guide: t("Guide/Home (or skip)"),
   dup: "D-Pad ↑", ddown: "D-Pad ↓", dleft: "D-Pad ←", dright: "D-Pad →",
-  lt: "LT (gatilho esq.) - aperte até o fundo",
-  rt: "RT (gatilho dir.) - aperte até o fundo",
-  lx: "Stick ESQ. → direita", ly: "Stick ESQ. → baixo",
-  rx: "Stick DIR. → direita", ry: "Stick DIR. → baixo",
+  lt: t("LT (left trigger) - press all the way down"),
+  rt: t("RT (right trigger) - press all the way down"),
+  lx: t("LEFT stick → right"), ly: t("LEFT stick → down"),
+  rx: t("RIGHT stick → right"), ry: t("RIGHT stick → down"),
 };
 const remapState = { active: false, step: 0, draft: null, base: null, padId: null };
 
@@ -678,20 +689,20 @@ function curPad() {
 function startRemap() {
   const p = curPad();
   if (!p) {
-    setStatus("conecte um controle e mexa nele antes de remapear");
+    setStatus(t("connect a controller and move it before remapping"));
     return;
   }
-  // controle "standard" (Xbox e cia.) NÃO precisa de remap - passa direto.
-  // Remapear um standard só estraga. Bloqueia e avisa.
+  // a "standard" controller (Xbox and the like) does NOT need a remap - it passes
+  // straight through. Remapping a standard one only breaks it. Block and say so.
   if (p.mapping === "standard") {
-    setStatus("controle padrão (Xbox) - já passa direto, sem remap necessário");
+    setStatus(t("standard controller (Xbox) - already passes straight through, no remap needed"));
     return;
   }
   remapState.active = true;
   remapState.step = 0;
   remapState.padId = p.id;
   remapState.draft = { buttons: {}, axes: {}, triggers: {} };
-  // snapshot do estado de repouso pra detectar o que MUDOU
+  // snapshot of the resting state to detect what CHANGED
   remapState.base = { buttons: p.buttons.map((b) => b.value), axes: p.axes.slice() };
   $("remap").classList.remove("hidden");
   renderRemap();
@@ -705,18 +716,20 @@ function cancelRemap() {
 
 function renderRemap() {
   const step = REMAP_STEPS[remapState.step];
-  $("remapTitle").textContent =
-    `Remapear (${remapState.step + 1}/${REMAP_STEPS.length})`;
-  // STEP_LABEL cobre todos os nomes; o `|| name` é só rede de segurança.
+  $("remapTitle").textContent = t("Remap ({step}/{total})", {
+    step: remapState.step + 1,
+    total: REMAP_STEPS.length,
+  });
+  // STEP_LABEL covers every name; the `|| name` is only a safety net.
   /* v8 ignore next 2 */
   const label = step ? (STEP_LABEL[step.name] || step.name) : "";
-  $("remapPrompt").textContent = step ? `Acione: ${label}` : "";
+  $("remapPrompt").textContent = step ? t("Press: {label}", { label }) : "";
 }
 
-// detecta o controle bruto que mais se moveu desde o repouso
+// detects the raw control that moved the most since rest
 function detectChange(p) {
   const base = remapState.base;
-  let best = null, bestDelta = 0.35; // limiar p/ ignorar ruído
+  let best = null, bestDelta = 0.35; // threshold to ignore noise
   p.buttons.forEach((b, i) => {
     const d = Math.abs(b.value - (base.buttons[i] ?? 0));
     if (d > bestDelta) { bestDelta = d; best = { src: "button", i }; }
@@ -726,9 +739,9 @@ function detectChange(p) {
     const d = Math.abs((v || 0) - rest);
     if (d > bestDelta) {
       bestDelta = d;
-      // guarda repouso (rest) e valor pressionado (cur) p/ calibrar o gatilho:
-      // controle PS2/USB pode repousar o eixo em 0 (não em -1), e assumir -1
-      // deixa o gatilho 50% apertado parado -> double click.
+      // keeps the resting (rest) and pressed (cur) values to calibrate the trigger:
+      // a PS2/USB controller may rest the axis at 0 (not -1), and assuming -1
+      // leaves the trigger 50% pressed while idle -> double click.
       best = { src: "axis", i, rest, cur: v || 0 };
     }
   });
@@ -739,11 +752,11 @@ function applyDetection(step, found) {
   const d = remapState.draft;
   if (step.kind === "button") {
     if (found.src === "button") d.buttons[step.name] = found.i;
-    else d.axes[step.name + "_axisbtn"] = found.i; // raro: botão como eixo
+    else d.axes[step.name + "_axisbtn"] = found.i; // rare: a button reported as an axis
   } else if (step.kind === "axis") {
     if (found.src === "axis") d.axes[step.name] = found.i;
   } else if (step.kind === "trigger") {
-    // calibra min=repouso, max=pressionado (medidos no remap), não chuta -1..1.
+    // calibrates min=rest, max=pressed (measured during the remap), no -1..1 guess.
     d.triggers[step.name] = found.src === "axis"
       ? { src: "axis", i: found.i, min: found.rest, max: found.cur }
       : { src: "button", i: found.i };
@@ -759,8 +772,8 @@ function remapTick() {
     if (found) {
       applyDetection(REMAP_STEPS[remapState.step], found);
       remapState.step++;
-      remapCooldown = 18; // ~0.3s de respiro entre passos (evita pular sozinho)
-      // re-snapshot do repouso pro próximo passo
+      remapCooldown = 18; // ~0.3s pause between steps (avoids skipping by itself)
+      // re-snapshot the resting state for the next step
       remapState.base = { buttons: p.buttons.map((b) => b.value), axes: p.axes.slice() };
       if (remapState.step >= REMAP_STEPS.length) return finishRemap();
       renderRemap();
@@ -780,18 +793,18 @@ async function finishRemap() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: remapState.padId, map: remapState.draft }),
     });
-    setStatus("controle remapeado e salvo no servidor");
+    setStatus(t("controller remapped and saved on the server"));
   } catch (e) {
-    setStatus("remapeado (mas falhou ao salvar no servidor)");
+    setStatus(t("remapped (but saving to the server failed)"));
   }
 }
 
-// Apaga o perfil de remap do controle atual (no servidor e em memória). Útil
-// se um perfil ruim foi salvo num controle que na verdade é standard.
+// Deletes the current controller's remap profile (on the server and in memory).
+// Useful if a bad profile was saved for a controller that is actually standard.
 async function clearRemap() {
   const p = curPad();
   if (!p) {
-    setStatus("conecte um controle pra resetar o mapeamento");
+    setStatus(t("connect a controller to reset the mapping"));
     return;
   }
   delete padMaps[p.id];
@@ -801,9 +814,9 @@ async function clearRemap() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id: p.id }),
     });
-    setStatus("mapeamento do controle resetado (passa direto)");
+    setStatus(t("controller mapping reset (passes straight through)"));
   } catch (e) {
-    setStatus("resetado localmente (falhou no servidor)");
+    setStatus(t("reset locally (server failed)"));
   }
 }
 
@@ -827,9 +840,9 @@ $("full").addEventListener("click", () => {
 });
 $("kbd").addEventListener("click", () => toggleOSK());
 $("menuToggle").addEventListener("click", () => showBar(barHidden()));
-// barra escondida pela engrenagem: o canto onde ela ficava vira um "botão"
-// invisível (#menuRecall, só visível via CSS com a barra oculta). Fora dele o
-// clique segue normal pro PC remoto.
+// bar hidden by the gear: the corner where it was becomes an invisible
+// "button" (#menuRecall, shown by CSS only while the bar is hidden). Outside it
+// clicks go to the remote PC as usual.
 $("menuRecall").addEventListener("click", () => showBar(true));
 $("sound").addEventListener("click", () => setAudio(!audioOn));
 $("remapBtn").addEventListener("click", () => startRemap());
@@ -837,21 +850,21 @@ $("remapClear").addEventListener("click", () => clearRemap());
 $("remapSkip").addEventListener("click", () => skipRemapStep());
 $("remapCancel").addEventListener("click", () => cancelRemap());
 
-// ---------- recall da UI: mover o mouse pro topo revela a barra ----------
-// Sem reservar tecla (não colide com Win/Ubuntu/celular). Em fullscreen ou com
-// a barra escondida, encostar o cursor no topo (≤6% da altura) traz tudo de volta.
+// ---------- UI recall: moving the mouse to the top reveals the bar ----------
+// No reserved key (doesn't clash with Win/Ubuntu/phone). In fullscreen or with
+// the bar hidden, touching the top with the cursor (≤6% of the height) brings it back.
 function barHidden() {
   return $("bar").classList.contains("hidden");
 }
 function showBar(on) {
   $("bar").classList.toggle("hidden", !on);
 }
-// Só ABRE: uma vez aberta, a barra fica até clicar na engrenagem (⚙) de novo -
-// não há auto-hide (sumir sozinha atrapalhava mexer nos seletores).
+// It only OPENS: once open, the bar stays until the gear (⚙) is clicked again -
+// there is no auto-hide (hiding by itself got in the way of using the selectors).
 window.addEventListener("mousemove", (e) => {
   if (e.clientY <= Math.max(40, window.innerHeight * 0.06)) showBar(true);
 });
-// no mobile: swipe de cima pra baixo (ou toque na faixa superior) revela a barra
+// on mobile: a top-down swipe (or a touch on the top strip) reveals the bar
 window.addEventListener(
   "touchstart",
   (e) => {
@@ -867,48 +880,48 @@ document.querySelectorAll("[data-combo]").forEach((btn) => {
     const combo = COMBOS[btn.dataset.combo];
     if (combo) {
       sendChord(combo);
-      setStatus(`enviado: ${btn.textContent.trim()}`);
+      setStatus(t("sent: {combo}", { combo: btn.textContent.trim() }));
     }
   });
 });
 
-// preset = atalho rápido (aplica resolução+fps+bitrate de uma vez; o áudio
-// acompanha se você não tiver escolhido áudio na mão). Depois você refina cada
-// parâmetro nos seletores separados abaixo.
+// preset = quick shortcut (applies resolution+fps+bitrate at once; audio
+// follows unless you picked audio by hand). Then you fine-tune each parameter
+// in the separate selectors below.
 $("preset").addEventListener("change", (e) => {
   sendInput({ t: "q", preset: e.target.value });
-  setStatus(`preset: ${e.target.value}`);
-  // após aplicar o preset, recarrega pra refletir os novos res/fps/bitrate
+  setStatus(t("preset: {value}", { value: e.target.value }));
+  // after applying the preset, reload to reflect the new res/fps/bitrate
   setTimeout(loadConfig, 200);
 });
-// controles de vídeo INDEPENDENTES
+// INDEPENDENT video controls
 $("vres").addEventListener("change", (e) => {
   sendInput({ t: "vq", res: Number(e.target.value) });
-  setStatus(`resolução: ${e.target.value}p`);
+  setStatus(t("resolution: {value}p", { value: e.target.value }));
 });
 $("vfps").addEventListener("change", (e) => {
   sendInput({ t: "vq", fps: Number(e.target.value) });
-  setStatus(`fps: ${e.target.value}`);
+  setStatus(t("fps: {value}", { value: e.target.value }));
 });
 $("vbitrate").addEventListener("change", (e) => {
   sendInput({ t: "vq", bitrate: e.target.value });
-  setStatus(`bitrate: ${e.target.value}`);
+  setStatus(t("bitrate: {value}", { value: e.target.value }));
 });
-// áudio INDEPENDENTE
+// INDEPENDENT audio
 $("audioPreset").addEventListener("change", (e) => {
   sendInput({ t: "aq", preset: e.target.value });
-  setStatus(`áudio: ${e.target.value}`);
+  setStatus(t("audio: {value}", { value: e.target.value }));
 });
 $("monitor").addEventListener("change", (e) => {
   const v = e.target.value;
   sendInput({ t: "mon", i: v === "" ? null : Number(v) });
 });
 
-// ---------- teclado virtual (OSK) ----------
-// Painel clicável de PC completo: cada tecla manda KeyboardEvent.code direto.
-// Modificadores (Shift/Ctrl/Alt/Meta) são "sticky": clica -> fica preso até a
-// próxima tecla normal (ou clica de novo pra travar). Funciona em mobile e
-// complementa o teclado físico (que continua valendo com foco no canvas).
+// ---------- virtual keyboard (OSK) ----------
+// Clickable full PC panel: every key sends its KeyboardEvent.code directly.
+// Modifiers (Shift/Ctrl/Alt/Meta) are "sticky": click -> held until the next
+// normal key (or click again to lock). Works on mobile and complements the
+// physical keyboard (which still works with focus on the canvas).
 const OSK_ROWS = [
   ["Escape:Esc", "F1", "F2", "F3", "F4", "F5", "F6", "F7", "F8", "F9", "F10", "F12"],
   ["Backquote:`", "Digit1:1", "Digit2:2", "Digit3:3", "Digit4:4", "Digit5:5",
@@ -932,13 +945,13 @@ const stickyHeld = new Set();
 
 function buildOSK() {
   const k = $("osk");
-  if (k.childElementCount) return; // já montado
-  // o OSK cobre a barra (e o botão ⌨), então precisa do próprio botão de fechar
+  if (k.childElementCount) return; // already built
+  // the OSK covers the bar (and the ⌨ button), so it needs its own close button
   const head = document.createElement("div");
   head.className = "osk-head";
   const close = document.createElement("button");
   close.className = "osk-close";
-  close.textContent = "✕ fechar teclado";
+  close.textContent = t("✕ close keyboard");
   close.addEventListener("click", (ev) => {
     ev.preventDefault();
     toggleOSK(false);
@@ -979,7 +992,7 @@ function oskPress(code, btn) {
     }
     return;
   }
-  // tecla normal: aperta, solta; depois libera os modificadores sticky
+  // normal key: press, release; then release the sticky modifiers
   sendInput({ t: "k", code, down: true });
   sendInput({ t: "k", code, down: false });
   for (const m of stickyHeld) {
@@ -998,7 +1011,7 @@ function toggleOSK(force) {
   $("kbd").classList.toggle("on", show);
 }
 
-// preenche um <select> a partir de uma lista [{value,label}] marcando o atual.
+// fills a <select> from a [{value,label}] list, selecting the current one.
 function fillSelect(id, items, current) {
   const sel = $(id);
   sel.innerHTML = "";
@@ -1017,7 +1030,7 @@ async function loadConfig() {
     fillSelect("preset",
       cfg.presets.map((p) => ({ value: p, label: p })), cfg.current_preset);
 
-    // controles de vídeo independentes
+    // independent video controls
     const v = cfg.video || {};
     fillSelect("vres",
       (cfg.res_options || []).map((r) => ({ value: r, label: `${r}p` })), v.res);
@@ -1026,7 +1039,7 @@ async function loadConfig() {
     fillSelect("vbitrate",
       (cfg.bitrate_options || []).map((b) => ({ value: b, label: b })), v.bitrate);
 
-    // áudio: agora tem seletor próprio (qualidade independente)
+    // audio: has its own selector (independent quality)
     fillSelect("audioPreset",
       (cfg.audio_presets || []).map((a) => ({ value: a, label: a })),
       cfg.current_audio_preset);
@@ -1046,8 +1059,8 @@ async function loadConfig() {
       sbtn.disabled = true;
       audioPresetSel.disabled = true;
       sbtn.title = cfg.audio_available
-        ? "navegador sem AudioDecoder"
-        : "sem áudio no servidor";
+        ? t("browser without AudioDecoder")
+        : t("no audio on the server");
     }
   } catch (e) {
     console.warn("config", e);
@@ -1078,15 +1091,16 @@ function statsLoop() {
 
 // ---------- boot ----------
 function boot() {
+  I18N.translatePage(document, LANG);
   if (!("VideoDecoder" in window)) {
-    setStatus("Sem WebCodecs neste navegador. Use Chrome/Firefox/Edge via HTTPS.");
+    setStatus(t("No WebCodecs in this browser. Use Chrome/Firefox/Edge over HTTPS."));
     $("connect").disabled = true;
     return;
   }
   buildOSK();
   loadConfig();
   loadGamepadMaps();
-  setStatus("pronto - toque em Conectar");
+  setStatus(t("ready - tap Connect"));
   statsLoop();
   pollPads();
   requestAnimationFrame(flushMove);
@@ -1106,11 +1120,11 @@ if (typeof module !== "undefined" && module.exports) {
     loadGamepadMaps, mapPad, readSource, startRemap, cancelRemap,
     skipRemapStep, detectChange, applyDetection, finishRemap, remapTick,
     clearRemap, passthroughPad,
-    renderRemap,
+    renderRemap, t, LANG,
     __get: (k) => eval(k),
   };
 }
-/* v8 ignore start -- so roda no browser real (sem CommonJS); coberto no e2e Playwright */
+/* v8 ignore start -- only runs in the real browser (no CommonJS); covered by the Playwright e2e */
 else {
   boot();
 }

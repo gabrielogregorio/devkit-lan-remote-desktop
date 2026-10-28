@@ -1,5 +1,5 @@
 {
-  "name": "remote-link-web-tests",
+  "name": "devkit-lan-remote-desktop-web-tests",
   "private": true,
   "type": "commonjs",
   "scripts": {
@@ -7,9 +7,9 @@
     "test:e2e": "playwright test"
   },
   "devDependencies": {
-    "vitest": "^2.1.0",
-    "@vitest/coverage-v8": "^2.1.0",
-    "jsdom": "^25.0.0",
-    "@playwright/test": "^1.48.0"
+    "vitest": "2.1.9",
+    "@vitest/coverage-v8": "2.1.9",
+    "jsdom": "25.0.1",
+    "@playwright/test": "1.62.0"
   }
 }

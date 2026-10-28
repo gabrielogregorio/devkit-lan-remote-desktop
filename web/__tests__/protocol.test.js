@@ -1,19 +1,19 @@
 /**
- * Testes de CONTRATO e de PROPRIEDADE do cliente.
+ * CONTRACT and PROPERTY tests for the client.
  *
- * O app.test.js cobre exemplos ("apertei X, saiu Y"). Aqui a pergunta é outra:
- * *toda* mensagem que o cliente produz, sob qualquer entrada, continua sendo
- * algo que o servidor sabe receber?
+ * app.test.js covers examples ("I pressed X, Y came out"). Here the question is
+ * different: is *every* message the client produces, under any input, still
+ * something the server knows how to receive?
  *
- * Isso importa porque as duas pontas são versionadas juntas mas evoluem em
- * arquivos diferentes: o dia em que app.js mandar um campo com NaN, ou um `t`
- * que o ws_input não conhece, ninguém percebe até o controle "parar sozinho".
- * O espelho deste arquivo no servidor é tests/test_fuzz_input.py.
+ * This matters because both ends are versioned together but evolve in
+ * different files: the day app.js sends a field with NaN, or a `t` that
+ * ws_input doesn't know, nobody notices until the controller "stops by itself".
+ * The server-side mirror of this file is tests/test_fuzz_input.py.
  */
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import { loadApp } from "./setup.js";
 
-// ---- PRNG determinístico (falhou uma vez, falha sempre) -------------------
+// ---- deterministic PRNG (failed once, fails always) -----------------------
 function rng(seed) {
   let s = seed >>> 0;
   return () => {
@@ -23,31 +23,31 @@ function rng(seed) {
 }
 const SEEDS = [1, 42, 777, 20260813];
 
-// valores hostis que um controle/driver pode entregar
+// hostile values a controller/driver may report
 const CURSED = [
   undefined, null, NaN, Infinity, -Infinity, "0.5", "", true, false,
   {}, [], -5, 5, 1e308,
 ];
 
-// Tipos que o servidor (server/main.py ws_input + inject.Injector.handle) trata.
-const TIPOS_ACEITOS = new Set(["m", "mr", "md", "mu", "w", "k", "g", "q", "vq", "aq", "mon"]);
+// Types the server (server/main.py ws_input + inject.Injector.handle) handles.
+const ACCEPTED_TYPES = new Set(["m", "mr", "md", "mu", "w", "k", "g", "q", "vq", "aq", "mon"]);
 
 let app;
 beforeEach(async () => {
   app = await loadApp();
 });
 
-function enviados() {
+function sentMessages() {
   const ws = globalThis.__sockets.find((s) => s.url.endsWith("/ws/input"));
   return (ws ? ws.sent : []).map((s) => JSON.parse(s));
 }
 
-// ───────────────────────── contrato das mensagens ─────────────────────────
+// ───────────────────────── message contract ─────────────────────────
 
-describe("contrato: todo comando enviado é um comando que o servidor conhece", () => {
-  it("os tipos usados no app são exatamente os documentados", () => {
+describe("contract: every command sent is a command the server knows", () => {
+  it("the types used in the app are exactly the documented ones", () => {
     app.connect();
-    // exercita todas as origens de mensagem que existem no cliente
+    // exercises every message source that exists in the client
     app.sendInput({ t: "m", x: 0.5, y: 0.5 });
     app.sendChord(app.COMBOS.altf4);
     document.getElementById("preset").value = "low";
@@ -58,17 +58,17 @@ describe("contrato: todo comando enviado é um comando que o servidor conhece", 
     document.getElementById("vfps").dispatchEvent(new Event("change"));
     document.getElementById("vbitrate").value = "7M";
     document.getElementById("vbitrate").dispatchEvent(new Event("change"));
-    document.getElementById("audioPreset").value = "media";
+    document.getElementById("audioPreset").value = "medium";
     document.getElementById("audioPreset").dispatchEvent(new Event("change"));
     document.getElementById("monitor").value = "";
     document.getElementById("monitor").dispatchEvent(new Event("change"));
 
-    const msgs = enviados();
+    const msgs = sentMessages();
     expect(msgs.length).toBeGreaterThan(5);
-    for (const m of msgs) expect(TIPOS_ACEITOS.has(m.t)).toBe(true);
+    for (const m of msgs) expect(ACCEPTED_TYPES.has(m.t)).toBe(true);
   });
 
-  it("toda mensagem sobrevive ao JSON sem virar null/undefined", () => {
+  it("every message survives JSON without becoming null/undefined", () => {
     app.connect();
     const pad = {
       id: "P", mapping: "standard",
@@ -77,24 +77,24 @@ describe("contrato: todo comando enviado é um comando que o servidor conhece", 
     };
     navigator.getGamepads = () => [pad];
     app.pollPads();
-    for (const m of enviados()) {
+    for (const m of sentMessages()) {
       for (const [k, v] of Object.entries(m)) {
-        expect(v, `campo ${k} de t=${m.t}`).not.toBeNull();
+        expect(v, `field ${k} of t=${m.t}`).not.toBeNull();
         expect(v).not.toBeUndefined();
       }
     }
   });
 
-  it("'vq' manda só o campo que mudou (o servidor preenche o resto)", () => {
+  it("'vq' sends only the field that changed (the server fills in the rest)", () => {
     app.connect();
     document.getElementById("vfps").value = "30";
     document.getElementById("vfps").dispatchEvent(new Event("change"));
-    const vq = enviados().find((m) => m.t === "vq");
+    const vq = sentMessages().find((m) => m.t === "vq");
     expect(Object.keys(vq).sort()).toEqual(["fps", "t"]);
     expect(typeof vq.fps).toBe("number");
   });
 
-  it("'mon' manda null para o monitor primário (não string vazia)", () => {
+  it("'mon' sends null for the primary monitor (not an empty string)", () => {
     app.connect();
     const sel = document.getElementById("monitor");
     sel.innerHTML = "";
@@ -103,28 +103,28 @@ describe("contrato: todo comando enviado é um comando que o servidor conhece", 
     sel.appendChild(o);
     sel.value = "";
     sel.dispatchEvent(new Event("change"));
-    const mon = enviados().find((m) => m.t === "mon");
+    const mon = sentMessages().find((m) => m.t === "mon");
     expect(mon.i).toBeNull();
   });
 });
 
-// ───────────────────────── gamepad: propriedades ─────────────────────────
+// ───────────────────────── gamepad: properties ─────────────────────────
 
-function padAleatorio(rand, { standard } = {}) {
+function randomPad(rand, { standard } = {}) {
   const nAxes = Math.floor(rand() * 8);
   const nBtn = Math.floor(rand() * 20);
-  const valor = () =>
+  const value = () =>
     rand() < 0.4 ? CURSED[Math.floor(rand() * CURSED.length)] : rand() * 2 - 1;
   return {
     id: "Pad " + Math.floor(rand() * 3),
     mapping: standard ?? (rand() < 0.5 ? "standard" : ""),
-    axes: Array.from({ length: nAxes }, valor),
+    axes: Array.from({ length: nAxes }, value),
     buttons: Array.from({ length: nBtn }, () =>
-      rand() < 0.1 ? null : { pressed: rand() < 0.3, value: valor() }),
+      rand() < 0.1 ? null : { pressed: rand() < 0.3, value: value() }),
   };
 }
 
-function checaFrame(r) {
+function checkFrame(r) {
   expect(r.a).toHaveLength(4);
   for (const v of r.a) {
     expect(typeof v).toBe("number");
@@ -143,15 +143,15 @@ function checaFrame(r) {
   }
 }
 
-describe("propriedade: mapPad sempre produz um frame válido", () => {
+describe("property: mapPad always produces a valid frame", () => {
   for (const seed of SEEDS) {
-    it(`controles aleatórios (semente ${seed}) nunca quebram o formato`, () => {
+    it(`random controllers (seed ${seed}) never break the format`, () => {
       const rand = rng(seed);
-      for (let i = 0; i < 300; i++) checaFrame(app.mapPad(padAleatorio(rand)));
+      for (let i = 0; i < 300; i++) checkFrame(app.mapPad(randomPad(rand)));
     });
   }
 
-  it("com perfil de remap salvo apontando pra índices inexistentes", async () => {
+  it("with a saved remap profile pointing at indices that do not exist", async () => {
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         "Pad 0": {
@@ -164,11 +164,11 @@ describe("propriedade: mapPad sempre produz um frame válido", () => {
     await app.loadGamepadMaps();
     const rand = rng(9);
     for (let i = 0; i < 200; i++) {
-      checaFrame(app.mapPad(padAleatorio(rand, { standard: "" })));
+      checkFrame(app.mapPad(randomPad(rand, { standard: "" })));
     }
   });
 
-  it("perfil corrompido (tipos errados) não derruba o mapeamento", async () => {
+  it("a corrupted profile (wrong types) does not break the mapping", async () => {
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({ "Pad 0": { buttons: "nao-e-objeto", axes: 5, triggers: null } }),
     }));
@@ -178,32 +178,32 @@ describe("propriedade: mapPad sempre produz um frame válido", () => {
       axes: [0.5, 0.5, 0, 0],
       buttons: [{ pressed: true, value: 1 }],
     };
-    checaFrame(app.mapPad(p));
+    checkFrame(app.mapPad(p));
   });
 
-  it("pad sem arrays (driver estranho) vira frame neutro", () => {
-    checaFrame(app.mapPad({ id: "X", mapping: "standard" }));
-    checaFrame(app.mapPad({ id: "X", mapping: "standard", axes: null, buttons: null }));
+  it("a pad without arrays (odd driver) becomes a neutral frame", () => {
+    checkFrame(app.mapPad({ id: "X", mapping: "standard" }));
+    checkFrame(app.mapPad({ id: "X", mapping: "standard", axes: null, buttons: null }));
   });
 
-  it("botão com value ausente não explode (era TypeError em toFixed)", () => {
+  it("a button with a missing value does not blow up (it was a TypeError in toFixed)", () => {
     const p = {
       id: "X", mapping: "standard",
       axes: [0, 0, 0, 0],
       buttons: [{ pressed: true }, {}, null, undefined],
     };
     const r = app.mapPad(p);
-    checaFrame(r);
+    checkFrame(r);
     expect(r.b[0]).toEqual({ p: true, v: 0 });
   });
 });
 
-describe("propriedade: readSource fica sempre em 0..1", () => {
+describe("property: readSource always stays in 0..1", () => {
   for (const seed of SEEDS) {
-    it(`fontes aleatórias (semente ${seed})`, () => {
+    it(`random sources (seed ${seed})`, () => {
       const rand = rng(seed);
       for (let i = 0; i < 200; i++) {
-        const p = padAleatorio(rand);
+        const p = randomPad(rand);
         const src = rand() < 0.5
           ? { src: "button", i: Math.floor(rand() * 25) }
           : {
@@ -219,34 +219,34 @@ describe("propriedade: readSource fica sempre em 0..1", () => {
     });
   }
 
-  it("pad sem buttons/axes (driver estranho) devolve solto", () => {
+  it("a pad without buttons/axes (odd driver) returns released", () => {
     expect(app.readSource({}, { src: "button", i: 0 })).toBe(0);
     expect(app.readSource({}, { src: "axis", i: 0 })).toBe(0);
   });
 
-  it("calibração degenerada (min == max) trata como solto", () => {
+  it("a degenerate calibration (min == max) is treated as released", () => {
     const p = { axes: [0.7], buttons: [] };
     expect(app.readSource(p, { src: "axis", i: 0, min: 0.5, max: 0.5 })).toBe(0);
   });
 
-  it("eixo invertido (repouso 0, fundo -1) é normalizado igual", () => {
+  it("an inverted axis (rest 0, bottom -1) is normalized the same way", () => {
     const p = { axes: [-1], buttons: [] };
     expect(app.readSource(p, { src: "axis", i: 0, min: 0, max: -1 })).toBe(1);
   });
 });
 
-describe("pollPads sobrevive a controle hostil (o loop não pode morrer)", () => {
-  it("mapPad explodindo não impede o próximo quadro", () => {
+describe("pollPads survives a hostile controller (the loop must not die)", () => {
+  it("mapPad blowing up does not prevent the next frame", () => {
     const raf = vi.fn();
     globalThis.requestAnimationFrame = raf;
     navigator.getGamepads = () => {
       throw new Error("driver quebrado");
     };
     expect(() => app.pollPads()).not.toThrow();
-    expect(raf).toHaveBeenCalled(); // reagendou mesmo com erro
+    expect(raf).toHaveBeenCalled(); // rescheduled even after an error
   });
 
-  it("não reenvia quando nada mudou (dedup por byte do gatilho)", () => {
+  it("does not resend when nothing changed (dedup by trigger byte)", () => {
     app.connect();
     const pad = {
       id: "P", mapping: "standard", axes: [0, 0, 0, 0],
@@ -254,33 +254,33 @@ describe("pollPads sobrevive a controle hostil (o loop não pode morrer)", () =>
     };
     navigator.getGamepads = () => [pad];
     app.pollPads();
-    const n = enviados().filter((m) => m.t === "g").length;
+    const n = sentMessages().filter((m) => m.t === "g").length;
     app.pollPads();
     app.pollPads();
-    expect(enviados().filter((m) => m.t === "g").length).toBe(n);
+    expect(sentMessages().filter((m) => m.t === "g").length).toBe(n);
   });
 
-  it("ruído menor que 1/255 no gatilho não vira mensagem nova", () => {
+  it("trigger noise below 1/255 does not become a new message", () => {
     app.connect();
     const btns = () => Array.from({ length: 17 }, () => ({ pressed: false, value: 0 }));
     const pad = { id: "P", mapping: "standard", axes: [0, 0, 0, 0], buttons: btns() };
     navigator.getGamepads = () => [pad];
     app.pollPads();
-    const antes = enviados().filter((m) => m.t === "g").length;
+    const before = sentMessages().filter((m) => m.t === "g").length;
     pad.buttons[6] = { pressed: false, value: 0.001 }; // < 1/255
     app.pollPads();
-    expect(enviados().filter((m) => m.t === "g").length).toBe(antes);
-    pad.buttons[6] = { pressed: true, value: 0.5 };    // mudança real
+    expect(sentMessages().filter((m) => m.t === "g").length).toBe(before);
+    pad.buttons[6] = { pressed: true, value: 0.5 };    // real change
     app.pollPads();
-    expect(enviados().filter((m) => m.t === "g").length).toBe(antes + 1);
+    expect(sentMessages().filter((m) => m.t === "g").length).toBe(before + 1);
   });
 });
 
-// ───────────────────────── vídeo/áudio sob lixo ─────────────────────────
+// ───────────────────────── video/audio under garbage ─────────────────────────
 
-describe("fuzz: bytes aleatórios no lugar do stream", () => {
+describe("fuzz: random bytes instead of the stream", () => {
   for (const seed of SEEDS) {
-    it(`onAU com lixo (semente ${seed}) não levanta`, () => {
+    it(`onAU with garbage (seed ${seed}) does not throw`, () => {
       const rand = rng(seed);
       for (let i = 0; i < 120; i++) {
         const n = Math.floor(rand() * 60);
@@ -291,12 +291,12 @@ describe("fuzz: bytes aleatórios no lugar do stream", () => {
     });
   }
 
-  it("AU vazia e AU só com start code não quebram", () => {
+  it("an empty AU and an AU with only a start code do not break", () => {
     expect(() => app.onAU(new Uint8Array([]).buffer)).not.toThrow();
     expect(() => app.onAU(new Uint8Array([0, 0, 1]).buffer)).not.toThrow();
   });
 
-  it("onAudioPacket com pacotes aleatórios não levanta", () => {
+  it("onAudioPacket with random packets does not throw", () => {
     const rand = rng(5);
     for (let i = 0; i < 60; i++) {
       const n = Math.floor(rand() * 200);
@@ -304,7 +304,7 @@ describe("fuzz: bytes aleatórios no lugar do stream", () => {
     }
   });
 
-  it("findNALs em lixo devolve sempre tipos 0..31", () => {
+  it("findNALs on garbage always returns types 0..31", () => {
     const rand = rng(3);
     for (let i = 0; i < 200; i++) {
       const n = Math.floor(rand() * 80);
@@ -318,23 +318,23 @@ describe("fuzz: bytes aleatórios no lugar do stream", () => {
   });
 });
 
-describe("loadConfig com respostas ruins do servidor", () => {
-  const respostas = [
+describe("loadConfig with bad server responses", () => {
+  const responses = [
     {},
     { presets: null },
     { presets: ["high"], monitors: null },
     { presets: [], monitors: [], res_options: null, audio_presets: null },
     null,
   ];
-  for (const [i, body] of respostas.entries()) {
-    it(`resposta #${i} não quebra a UI`, async () => {
+  for (const [i, body] of responses.entries()) {
+    it(`response #${i} does not break the UI`, async () => {
       globalThis.fetch = vi.fn(async () => ({ json: async () => body }));
       await expect(app.loadConfig()).resolves.toBeUndefined();
     });
   }
 
-  it("resposta completa preenche os seletores", async () => {
-    await app.loadConfig(); // usa o fetch padrão do setup.js
+  it("a complete response fills the selectors", async () => {
+    await app.loadConfig(); // uses the default fetch from setup.js
     expect(document.getElementById("preset").children.length).toBe(5);
     expect(document.getElementById("vres").children.length).toBe(6);
     expect(document.getElementById("monitor").children.length).toBe(1);

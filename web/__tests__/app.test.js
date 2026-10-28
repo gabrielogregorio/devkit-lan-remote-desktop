@@ -7,21 +7,21 @@ beforeEach(async () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4.1 Funções puras
+// 4.1 Pure functions
 // ---------------------------------------------------------------------------
 
 describe("hex2", () => {
-  it("pad único dígito", () => expect(app.hex2(5)).toBe("05"));
-  it("valor máximo byte", () => expect(app.hex2(255)).toBe("ff"));
+  it("pads a single digit", () => expect(app.hex2(5)).toBe("05"));
+  it("maximum byte value", () => expect(app.hex2(255)).toBe("ff"));
   it("zero", () => expect(app.hex2(0)).toBe("00"));
 });
 
-describe("wsBase / protocolo", () => {
+describe("wsBase / protocol", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
   });
 
-  it("sob https usa wss://", async () => {
+  it("under https uses wss://", async () => {
     vi.stubGlobal("location", { protocol: "https:", host: "h:8443" });
     const httpsApp = await loadApp();
     httpsApp.connectInput();
@@ -31,7 +31,7 @@ describe("wsBase / protocolo", () => {
 });
 
 describe("findNALs", () => {
-  it("dois start codes retorna 2 entradas com type e hdr corretos", () => {
+  it("two start codes return 2 entries with the right type and hdr", () => {
     const buf = new Uint8Array([0, 0, 1, 0x67, 0xAA, 0, 0, 1, 0x41, 0xBB]);
     const nals = app.findNALs(buf);
     expect(nals).toHaveLength(2);
@@ -41,41 +41,41 @@ describe("findNALs", () => {
     expect(nals[1].hdr).toBe(8);
   });
 
-  it("sem start code retorna []", () => {
+  it("no start code returns []", () => {
     const buf = new Uint8Array([0x01, 0x02, 0x03, 0x04]);
     expect(app.findNALs(buf)).toEqual([]);
   });
 
-  it("4-byte start code não falsa-detecta entrada extra", () => {
-    // [0,0,0,1] — o zero extra é posição i, depois i+1=0, i+2=0, i+3=1: detecta
-    // mas o byte de tipo é buf[i+3] = o '0x67' seguinte, não o '1'
+  it("a 4-byte start code does not falsely detect an extra entry", () => {
+    // [0,0,0,1] — the extra zero is position i, then i+1=0, i+2=0, i+3=1: detected
+    // but the type byte is buf[i+3] = the following '0x67', not the '1'
     const buf = new Uint8Array([0, 0, 0, 1, 0x67]);
     const nals = app.findNALs(buf);
-    // O parser acha [0,0,1] em i=1 (buf[1]=0, buf[2]=0, buf[3]=1), tipo=buf[4]=0x67
+    // The parser finds [0,0,1] at i=1 (buf[1]=0, buf[2]=0, buf[3]=1), type=buf[4]=0x67
     expect(nals.length).toBeGreaterThanOrEqual(1);
-    // Confirma que o i+=2 (incremento extra) funciona: com buf de 2 start codes
-    // consecutivos, nenhum é pulado
+    // Confirms the i+=2 (extra increment) works: with a buf of 2 consecutive
+    // start codes, none is skipped
     const buf2 = new Uint8Array([0, 0, 1, 0x67, 0, 0, 1, 0x41]);
     expect(app.findNALs(buf2)).toHaveLength(2);
   });
 });
 
 describe("codecFromSPS", () => {
-  it("constrói string avc1 correta a partir de bytes SPS", () => {
+  it("builds the right avc1 string from SPS bytes", () => {
     // au = [0,0,1,0x67, P, C, L]  spsHdr=3
     const au = new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f]);
     const result = app.codecFromSPS(au, 3);
     expect(result).toBe("avc1.64001f");
   });
 
-  it("formato avc1.xxxxxx (6 hex chars)", () => {
+  it("avc1.xxxxxx format (6 hex chars)", () => {
     const au = new Uint8Array([0, 0, 1, 0x67, 0x42, 0xc0, 0x1e]);
     expect(app.codecFromSPS(au, 3)).toMatch(/^avc1\.[0-9a-f]{6}$/);
   });
 });
 
 describe("sendChord", () => {
-  it("aperta na ordem e solta na ordem inversa", () => {
+  it("presses in order and releases in reverse order", () => {
     app.connectInput();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.sent = [];
@@ -90,27 +90,27 @@ describe("sendChord", () => {
   });
 });
 
-describe("OSK (teclado virtual)", () => {
-  it("buildOSK monta as teclas uma vez só", () => {
+describe("OSK (virtual keyboard)", () => {
+  it("buildOSK builds the keys only once", () => {
     app.buildOSK();
     const n = document.getElementById("osk").querySelectorAll(".osk-key").length;
     expect(n).toBeGreaterThan(0);
-    app.buildOSK(); // idempotente
+    app.buildOSK(); // idempotent
     expect(document.getElementById("osk").querySelectorAll(".osk-key").length).toBe(n);
   });
 
-  it("toggleOSK alterna a classe hidden", () => {
+  it("toggleOSK toggles the hidden class", () => {
     app.buildOSK();
     const k = document.getElementById("osk");
     app.toggleOSK(true);
     expect(k.classList.contains("hidden")).toBe(false);
     app.toggleOSK(false);
     expect(k.classList.contains("hidden")).toBe(true);
-    app.toggleOSK(); // sem arg: inverte (estava hidden -> mostra)
+    app.toggleOSK(); // no arg: flips (was hidden -> shows)
     expect(k.classList.contains("hidden")).toBe(false);
   });
 
-  it("oskPress de tecla normal envia down+up", () => {
+  it("oskPress on a normal key sends down+up", () => {
     app.connectInput();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.sent = [];
@@ -121,23 +121,23 @@ describe("OSK (teclado virtual)", () => {
     expect(seq).toContainEqual({ t: "k", code: "KeyA", down: false });
   });
 
-  it("modificador sticky: trava, aplica numa tecla normal e solta", () => {
+  it("sticky modifier: locks, applies to a normal key and releases", () => {
     app.connectInput();
     app.buildOSK();
     const k = document.getElementById("osk");
     const shift = k.querySelector('[data-code="ShiftLeft"]');
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.sent = [];
-    app.oskPress("ShiftLeft", shift); // trava
+    app.oskPress("ShiftLeft", shift); // locks
     expect(shift.classList.contains("held")).toBe(true);
-    app.oskPress("KeyA", document.createElement("button")); // usa e libera
+    app.oskPress("KeyA", document.createElement("button")); // uses and releases
     expect(shift.classList.contains("held")).toBe(false);
     const downs = ws.sent.map(JSON.parse);
     expect(downs).toContainEqual({ t: "k", code: "ShiftLeft", down: true });
     expect(downs).toContainEqual({ t: "k", code: "ShiftLeft", down: false });
   });
 
-  it("sticky clicado 2x destrava sem aplicar", () => {
+  it("sticky clicked twice unlocks without applying", () => {
     app.connectInput();
     app.buildOSK();
     const k = document.getElementById("osk");
@@ -148,7 +148,7 @@ describe("OSK (teclado virtual)", () => {
     expect(ctrl.classList.contains("held")).toBe(false);
   });
 
-  it("botão ✕ do próprio OSK fecha o teclado", () => {
+  it("the OSK's own ✕ button closes the keyboard", () => {
     app.toggleOSK(true);
     const k = document.getElementById("osk");
     k.querySelector(".osk-close").click();
@@ -156,7 +156,7 @@ describe("OSK (teclado virtual)", () => {
     expect(document.getElementById("kbd").classList.contains("on")).toBe(false);
   });
 
-  it("clicar numa tecla real do OSK envia a tecla", () => {
+  it("clicking a real OSK key sends the key", () => {
     app.connectInput();
     app.buildOSK();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
@@ -168,22 +168,22 @@ describe("OSK (teclado virtual)", () => {
   });
 });
 
-describe("recall da barra (mouse no topo)", () => {
-  it("mousemove no topo mostra a barra", () => {
+describe("bar recall (mouse at the top)", () => {
+  it("mousemove at the top shows the bar", () => {
     document.getElementById("bar").classList.add("hidden");
     window.dispatchEvent(new MouseEvent("mousemove", { clientY: 2 }));
     expect(app.barHidden()).toBe(false);
   });
-  it("clique no canto da engrenagem (#menuRecall) traz a barra de volta", () => {
+  it("a click on the gear corner (#menuRecall) brings the bar back", () => {
     app.showBar(false);
     document.getElementById("menuRecall").click();
     expect(app.barHidden()).toBe(false);
   });
-  it("showBar(false) esconde", () => {
+  it("showBar(false) hides", () => {
     app.showBar(false);
     expect(app.barHidden()).toBe(true);
   });
-  it("sem auto-hide: aberta, só some pela engrenagem", () => {
+  it("no auto-hide: once open, it only hides via the gear", () => {
     vi.useFakeTimers();
     Object.defineProperty(document, "pointerLockElement", {
       value: null, configurable: true,
@@ -197,7 +197,7 @@ describe("recall da barra (mouse no topo)", () => {
     document.getElementById("menuToggle").click();
     expect(app.barHidden()).toBe(true);
   });
-  it("touchstart no topo (mobile) revela a barra", () => {
+  it("touchstart at the top (mobile) reveals the bar", () => {
     document.getElementById("bar").classList.add("hidden");
     const t = { clientY: 3, identifier: 1, clientX: 0, target: document.body };
     const ev = new Event("touchstart");
@@ -208,10 +208,10 @@ describe("recall da barra (mouse no topo)", () => {
 });
 
 describe("displayedRect", () => {
-  it("16:9 numa tela 16:9 → preenche sem barras", () => {
+  it("16:9 on a 16:9 screen → fills with no bars", () => {
     const canvas = document.getElementById("screen");
     canvas.width = 1280;
-    canvas.height = 720; // aspecto = elemento (1920x1080)
+    canvas.height = 720; // aspect = element (1920x1080)
     const r = app.displayedRect();
     expect(r.left).toBeCloseTo(0);
     expect(r.top).toBeCloseTo(0);
@@ -219,10 +219,10 @@ describe("displayedRect", () => {
     expect(r.height).toBeCloseTo(1080);
   });
 
-  it("buffer mais 'alto' que o elemento → barras laterais (offset em left)", () => {
+  it("buffer 'taller' than the element → side bars (offset in left)", () => {
     const canvas = document.getElementById("screen");
     canvas.width = 540;
-    canvas.height = 540; // 1:1 num elemento 16:9 → escala por altura, sobra nos lados
+    canvas.height = 540; // 1:1 in a 16:9 element → scales by height, space left on the sides
     const r = app.displayedRect();
     expect(r.height).toBeCloseTo(1080);
     expect(r.width).toBeCloseTo(1080);
@@ -230,7 +230,7 @@ describe("displayedRect", () => {
     expect(r.top).toBeCloseTo(0);
   });
 
-  it("fallback quando o buffer é 0 usa o tamanho do elemento", () => {
+  it("fallback when the buffer is 0 uses the element size", () => {
     const canvas = document.getElementById("screen");
     canvas.width = 0;
     canvas.height = 0;
@@ -241,41 +241,41 @@ describe("displayedRect", () => {
 });
 
 describe("normFromEvent", () => {
-  it("centro exato 0.5,0.5", () => {
+  it("exact center 0.5,0.5", () => {
     const n = app.normFromEvent({ clientX: 960, clientY: 540 });
     expect(n.x).toBeCloseTo(0.5);
     expect(n.y).toBeCloseTo(0.5);
   });
-  it("clamp negativo → 0", () => {
+  it("negative clamp → 0", () => {
     expect(app.normFromEvent({ clientX: -100, clientY: -100 }).x).toBe(0);
     expect(app.normFromEvent({ clientX: -100, clientY: -100 }).y).toBe(0);
   });
-  it("clamp além da borda → 1", () => {
+  it("clamp past the edge → 1", () => {
     expect(app.normFromEvent({ clientX: 9999, clientY: 9999 }).x).toBe(1);
     expect(app.normFromEvent({ clientX: 9999, clientY: 9999 }).y).toBe(1);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 4.2 WebCodecs vídeo
+// 4.2 WebCodecs video
 // ---------------------------------------------------------------------------
 
 describe("ensureDecoder", () => {
-  it("primeira chamada cria VideoDecoder configurado", () => {
+  it("first call creates a configured VideoDecoder", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     expect(dec).not.toBeNull();
     expect(dec).toBeInstanceOf(globalThis.VideoDecoder);
   });
 
-  it("segunda chamada com decoder aberto não recria", () => {
+  it("second call with an open decoder does not recreate it", () => {
     app.ensureDecoder();
     const first = app.__get("decoder");
     app.ensureDecoder();
     expect(app.__get("decoder")).toBe(first);
   });
 
-  it("com decoder.state === 'closed' recria", () => {
+  it("with decoder.state === 'closed' recreates it", () => {
     app.ensureDecoder();
     const first = app.__get("decoder");
     first.state = "closed";
@@ -283,10 +283,10 @@ describe("ensureDecoder", () => {
     expect(app.__get("decoder")).not.toBe(first);
   });
 
-  it("callback output: drawImage + frame.close + incrementa frames", () => {
+  it("output callback: drawImage + frame.close + increments frames", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
-    const moduleCtx = app.__get("ctx"); // ctx capturado pelo módulo no load
+    const moduleCtx = app.__get("ctx"); // ctx captured by the module at load
     const frame = { displayWidth: 1920, displayHeight: 1080, close: vi.fn() };
     const framesBefore = app.__get("frames");
     dec.cfg.output(frame);
@@ -295,7 +295,7 @@ describe("ensureDecoder", () => {
     expect(app.__get("frames")).toBe(framesBefore + 1);
   });
 
-  it("callback output: ajusta canvas.width/height quando diferem", () => {
+  it("output callback: adjusts canvas.width/height when they differ", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     const canvas = document.getElementById("screen");
@@ -306,21 +306,21 @@ describe("ensureDecoder", () => {
     expect(canvas.height).toBe(600);
   });
 
-  it("callback output: decodeLatency só atualiza na segunda chamada", () => {
+  it("output callback: decodeLatency only updates on the second call", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     const frame = { displayWidth: 1920, displayHeight: 1080, close: vi.fn() };
-    // Primeira chamada — lastFrameAt era 0, não atualiza decodeLatency
+    // First call — lastFrameAt was 0, decodeLatency not updated
     globalThis.performance.now.mockReturnValue(100);
     dec.cfg.output(frame);
     expect(app.__get("decodeLatency")).toBe(0);
-    // Segunda chamada — lastFrameAt != 0, atualiza
+    // Second call — lastFrameAt != 0, updated
     globalThis.performance.now.mockReturnValue(200);
     dec.cfg.output({ ...frame, close: vi.fn() });
     expect(app.__get("decodeLatency")).toBeGreaterThan(0);
   });
 
-  it("callback error chama resetDecoder", () => {
+  it("error callback calls resetDecoder", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     dec.cfg.error(new Error("test error"));
@@ -329,7 +329,7 @@ describe("ensureDecoder", () => {
 });
 
 describe("resetDecoder", () => {
-  it("fecha decoder e zera estado", () => {
+  it("closes the decoder and clears state", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     app.resetDecoder();
@@ -339,7 +339,7 @@ describe("resetDecoder", () => {
     expect(app.__get("codecStr")).toBeNull();
   });
 
-  it("close() lançando é silenciado, decoder fica null", () => {
+  it("a throwing close() is swallowed, decoder becomes null", () => {
     app.ensureDecoder();
     const dec = app.__get("decoder");
     dec.close = () => { throw new Error("boom"); };
@@ -347,74 +347,74 @@ describe("resetDecoder", () => {
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("com decoder null não levanta", () => {
+  it("with a null decoder does not throw", () => {
     expect(() => app.resetDecoder()).not.toThrow();
   });
 });
 
 describe("onAU", () => {
-  // AU com SPS (type 7) + IDR (type 5) + bytes de codec
+  // AU with SPS (type 7) + IDR (type 5) + codec bytes
   const spsAU = () =>
     new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer;
   const deltaAU = () =>
     new Uint8Array([0, 0, 1, 0x61, 0x01]).buffer;
   const flush = () => new Promise((r) => setTimeout(r, 0));
 
-  // A configuração é assíncrona (isConfigSupported). O 1º keyframe dispara a
-  // sondagem e NÃO decodifica; após configurado, o decoder ainda EXIGE um
-  // keyframe como 1º chunk (needKey) -> mandamos mais um SPS pra destravar.
+  // Configuration is async (isConfigSupported). The 1st keyframe starts the
+  // probe and does NOT decode; once configured, the decoder still REQUIRES a
+  // keyframe as the 1st chunk (needKey) -> we send one more SPS to unlock it.
   async function setup() {
-    app.onAU(spsAU()); // dispara configuração async
+    app.onAU(spsAU()); // starts async configuration
     await flush();
     expect(app.__get("configured")).toBe(true);
-    app.onAU(spsAU()); // 1º keyframe pós-config: zera needKey e decodifica
+    app.onAU(spsAU()); // 1st keyframe after config: clears needKey and decodes
     expect(app.__get("needKey")).toBe(false);
   }
 
-  it("AU sem SPS e configured=false retorna sem criar decoder", () => {
+  it("AU without SPS and configured=false returns without creating a decoder", () => {
     app.onAU(deltaAU());
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("1º SPS configura (async) sem decodificar; keyframe seguinte decodifica key", async () => {
+  it("1st SPS configures (async) without decoding; the next keyframe decodes as key", async () => {
     await setup();
     const dec = app.__get("decoder");
     expect(dec).not.toBeNull();
     expect(dec.decoded[dec.decoded.length - 1].type).toBe("key");
   });
 
-  it("após config, deltas são descartados até chegar um keyframe", async () => {
+  it("after config, deltas are dropped until a keyframe arrives", async () => {
     app.onAU(spsAU());
     await flush();
     expect(app.__get("configured")).toBe(true);
     expect(app.__get("needKey")).toBe(true);
     const dec = app.__get("decoder");
-    // delta antes do keyframe -> NÃO decodifica (needKey ainda true)
+    // delta before the keyframe -> does NOT decode (needKey still true)
     app.onAU(deltaAU());
     expect(dec.decoded).toBeUndefined();
     expect(app.__get("needKey")).toBe(true);
-    // chega o keyframe -> destrava e decodifica
+    // the keyframe arrives -> unlocks and decodes
     app.onAU(spsAU());
     expect(app.__get("needKey")).toBe(false);
     expect(dec.decoded[dec.decoded.length - 1].type).toBe("key");
   });
 
-  it("enquanto configura (async em andamento) o AU é ignorado", () => {
+  it("while configuring (async in progress) the AU is ignored", () => {
     app.onAU(spsAU());
     expect(app.__get("configuring")).toBe(true);
     const before = app.__get("decoder");
-    app.onAU(spsAU()); // chega no meio da sondagem -> early return
+    app.onAU(spsAU()); // arrives in the middle of the probe -> early return
     expect(app.__get("decoder")).toBe(before);
   });
 
-  it("AU delta após configurado decodifica como delta", async () => {
+  it("a delta AU after configuration decodes as delta", async () => {
     await setup();
     const dec = app.__get("decoder");
     app.onAU(deltaAU());
     expect(dec.decoded[dec.decoded.length - 1].type).toBe("delta");
   });
 
-  it("decode lançando chama resetDecoder", async () => {
+  it("a throwing decode calls resetDecoder", async () => {
     await setup();
     const dec = app.__get("decoder");
     dec.decode = () => { throw new Error("decode fail"); };
@@ -422,7 +422,7 @@ describe("onAU", () => {
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("acumula bytes", async () => {
+  it("accumulates bytes", async () => {
     await setup();
     const b1 = app.__get("bytes");
     app.onAU(deltaAU());
@@ -433,13 +433,13 @@ describe("onAU", () => {
 describe("configureDecoder (fallback Chrome/Linux)", () => {
   const codec = "avc1.640028";
 
-  it("usa prefer-hardware quando suportado", async () => {
+  it("uses prefer-hardware when supported", async () => {
     const ok = await app.configureDecoder(codec);
     expect(ok).toBe(true);
     expect(app.__get("decoder").configured.hardwareAcceleration).toBe("prefer-hardware");
   });
 
-  it("cai pra no-preference quando hardware não é suportado", async () => {
+  it("falls back to no-preference when hardware is not supported", async () => {
     let calls = 0;
     globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
       calls++;
@@ -451,13 +451,13 @@ describe("configureDecoder (fallback Chrome/Linux)", () => {
     expect(calls).toBeGreaterThanOrEqual(2);
   });
 
-  it("nenhum modo suportado: retorna false e seta status", async () => {
+  it("no mode supported: returns false and sets the status", async () => {
     globalThis.VideoDecoder.isConfigSupported = async () => ({ supported: false });
     const ok = await app.configureDecoder(codec);
     expect(ok).toBe(false);
   });
 
-  it("isConfigSupported lançando: tenta o próximo modo", async () => {
+  it("a throwing isConfigSupported: tries the next mode", async () => {
     let n = 0;
     globalThis.VideoDecoder.isConfigSupported = async (cfg) => {
       n++;
@@ -469,7 +469,7 @@ describe("configureDecoder (fallback Chrome/Linux)", () => {
     expect(n).toBeGreaterThanOrEqual(2);
   });
 
-  it("usa as dimensões reais do canvas e sup.config quando presentes", async () => {
+  it("uses the real canvas size and sup.config when present", async () => {
     const canvas = document.getElementById("screen");
     canvas.width = 1280;
     canvas.height = 720;
@@ -485,14 +485,14 @@ describe("configureDecoder (fallback Chrome/Linux)", () => {
     expect(app.__get("decoder").configured.marker).toBe(1);
   });
 
-  it("sem sup.config usa o cfg local", async () => {
+  it("without sup.config uses the local cfg", async () => {
     globalThis.VideoDecoder.isConfigSupported = async (cfg) => ({ supported: true });
     const ok = await app.configureDecoder(codec);
     expect(ok).toBe(true);
     expect(app.__get("decoder").configured.codec).toBe(codec);
   });
 
-  it("canvas sem dimensões usa fallback 1920x1080", async () => {
+  it("a canvas without size falls back to 1920x1080", async () => {
     const canvas = document.getElementById("screen");
     canvas.width = 0;
     canvas.height = 0;
@@ -508,23 +508,23 @@ describe("configureDecoder (fallback Chrome/Linux)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4.3 WebCodecs áudio
+// 4.3 WebCodecs audio
 // ---------------------------------------------------------------------------
 
 describe("startAudioContext", () => {
-  it("primeira chamada cria AudioContext", () => {
+  it("first call creates the AudioContext", () => {
     app.startAudioContext();
     expect(app.__get("audioCtx")).not.toBeNull();
   });
 
-  it("segunda chamada com state=running não recria", () => {
+  it("second call with state=running does not recreate it", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     app.startAudioContext();
     expect(app.__get("audioCtx")).toBe(ctx);
   });
 
-  it("com state=suspended chama resume()", () => {
+  it("with state=suspended calls resume()", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     ctx.state = "suspended";
@@ -533,7 +533,7 @@ describe("startAudioContext", () => {
     expect(resumeSpy).toHaveBeenCalled();
   });
 
-  it("fallback webkitAudioContext", () => {
+  it("webkitAudioContext fallback", () => {
     const savedAC = globalThis.AudioContext;
     globalThis.AudioContext = undefined;
     globalThis.webkitAudioContext = savedAC;
@@ -545,21 +545,21 @@ describe("startAudioContext", () => {
 });
 
 describe("ensureAudioDecoder / resetAudioDecoder", () => {
-  it("ensureAudioDecoder cria e configura AudioDecoder", () => {
+  it("ensureAudioDecoder creates and configures the AudioDecoder", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     expect(ad).not.toBeNull();
     expect(ad.state).toBe("configured");
   });
 
-  it("segunda chamada sem fechar não recria", () => {
+  it("second call without closing does not recreate it", () => {
     app.ensureAudioDecoder();
     const first = app.__get("audioDecoder");
     app.ensureAudioDecoder();
     expect(app.__get("audioDecoder")).toBe(first);
   });
 
-  it("com state=closed recria", () => {
+  it("with state=closed recreates it", () => {
     app.ensureAudioDecoder();
     const first = app.__get("audioDecoder");
     first.state = "closed";
@@ -567,7 +567,7 @@ describe("ensureAudioDecoder / resetAudioDecoder", () => {
     expect(app.__get("audioDecoder")).not.toBe(first);
   });
 
-  it("callback output encaminha para playAudio", () => {
+  it("output callback forwards to playAudio", () => {
     app.startAudioContext();
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
@@ -582,14 +582,14 @@ describe("ensureAudioDecoder / resetAudioDecoder", () => {
     expect(data.close).toHaveBeenCalled();
   });
 
-  it("callback error chama resetAudioDecoder", () => {
+  it("error callback calls resetAudioDecoder", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     ad.cfg.error(new Error("audio error"));
     expect(app.__get("audioDecoder")).toBeNull();
   });
 
-  it("resetAudioDecoder fecha decoder e zera playHead", () => {
+  it("resetAudioDecoder closes the decoder and clears playHead", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     app.resetAudioDecoder();
@@ -598,7 +598,7 @@ describe("ensureAudioDecoder / resetAudioDecoder", () => {
     expect(app.__get("playHead")).toBe(0);
   });
 
-  it("resetAudioDecoder: close() lançando é silenciado", () => {
+  it("resetAudioDecoder: a throwing close() is swallowed", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     ad.close = () => { throw new Error("boom"); };
@@ -606,7 +606,7 @@ describe("ensureAudioDecoder / resetAudioDecoder", () => {
     expect(app.__get("audioDecoder")).toBeNull();
   });
 
-  it("resetAudioDecoder com audioDecoder null não levanta", () => {
+  it("resetAudioDecoder with a null audioDecoder does not throw", () => {
     expect(() => app.resetAudioDecoder()).not.toThrow();
   });
 });
@@ -621,7 +621,7 @@ describe("playAudio", () => {
     ...overrides,
   });
 
-  it("sem audioCtx: chama data.close() e retorna", () => {
+  it("without audioCtx: calls data.close() and returns", () => {
     const data = makeData();
     const srcStart = vi.fn();
     app.playAudio(data);
@@ -629,7 +629,7 @@ describe("playAudio", () => {
     expect(srcStart).not.toHaveBeenCalled();
   });
 
-  it("normal: cria buffer, copia canais, agenda start", () => {
+  it("normal: creates the buffer, copies channels, schedules start", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     const srcSpy = ctx.createBufferSource();
@@ -641,17 +641,17 @@ describe("playAudio", () => {
     expect(data.close).toHaveBeenCalled();
   });
 
-  it("sem sampleRate: usa AUDIO_SR como fallback", () => {
+  it("without sampleRate: falls back to AUDIO_SR", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     const bufSpy = vi.spyOn(ctx, "createBuffer");
     const data = makeData({ sampleRate: undefined });
     app.playAudio(data);
-    // 3º arg (sampleRate) caiu no fallback AUDIO_SR (48000), não em undefined
+    // the 3rd arg (sampleRate) fell back to AUDIO_SR (48000), not undefined
     expect(bufSpy).toHaveBeenCalledWith(2, 960, 48000);
   });
 
-  it("copyTo com format lançando: usa fallback sem format", () => {
+  it("copyTo throwing with format: falls back to no format", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     const srcSpy = ctx.createBufferSource();
@@ -664,45 +664,45 @@ describe("playAudio", () => {
       }),
     });
     app.playAudio(data);
-    // fallback foi chamado (sem format)
+    // the fallback was called (no format)
     expect(calls).toBeGreaterThan(0);
     expect(data.close).toHaveBeenCalled();
   });
 
-  it("reancora quando playHead < now + 0.005 (atrasado)", () => {
+  it("re-anchors when playHead < now + 0.005 (behind)", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     ctx.currentTime = 1.0;
-    // playHead = 0 < 1.0 + 0.005 → reancora
+    // playHead = 0 < 1.0 + 0.005 → re-anchor
     const srcSpy = ctx.createBufferSource();
     vi.spyOn(ctx, "createBufferSource").mockReturnValue(srcSpy);
     app.playAudio(makeData());
-    // após reancora, playHead deve ser próximo de now + JITTER
+    // after re-anchoring, playHead must be close to now + JITTER
     expect(app.__get("playHead")).toBeGreaterThan(1.0);
   });
 
-  it("reancora quando playHead > now + JITTER + 0.12 (rajada)", () => {
+  it("re-anchors when playHead > now + JITTER + 0.12 (burst)", () => {
     app.startAudioContext();
     const ctx = app.__get("audioCtx");
     ctx.currentTime = 0;
-    // JITTER=0.06, duração por pacote = 960/48000 = 0.02s
-    // Trajetória com currentTime=0:
-    //   call1: playHead=0 < 0.005 → reancora → playHead = 0.06 + 0.02 = 0.08
-    //   calls 2-7: playHead cresce 0.02/call → após call7 playHead = 0.20
-    //   call8: 0.20 > 0 + 0.06 + 0.12 = 0.18 → reancora → playHead = 0.06 + 0.02 = 0.08
+    // JITTER=0.06, duration per packet = 960/48000 = 0.02s
+    // Trajectory with currentTime=0:
+    //   call1: playHead=0 < 0.005 → re-anchor → playHead = 0.06 + 0.02 = 0.08
+    //   calls 2-7: playHead grows 0.02/call → after call7 playHead = 0.20
+    //   call8: 0.20 > 0 + 0.06 + 0.12 = 0.18 → re-anchor → playHead = 0.06 + 0.02 = 0.08
     const srcSpy = { connect: vi.fn(), start: vi.fn(), buffer: null };
     vi.spyOn(ctx, "createBufferSource").mockReturnValue(srcSpy);
-    // 7 chamadas levam playHead a 0.20
+    // 7 calls take playHead to 0.20
     for (let i = 0; i < 7; i++) app.playAudio(makeData());
-    const phBefore = app.__get("playHead"); // deve ser ~0.20
-    // 8ª chamada dispara reancora: 0.20 > 0.18
+    const phBefore = app.__get("playHead"); // should be ~0.20
+    // the 8th call triggers the re-anchor: 0.20 > 0.18
     app.playAudio(makeData());
     expect(app.__get("playHead")).toBeLessThan(phBefore);
   });
 });
 
 describe("onAudioPacket", () => {
-  it("decodifica e incrementa audioTs em 20000", () => {
+  it("decodes and increments audioTs by 20000", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     const tsBefore = app.__get("audioTs");
@@ -713,7 +713,7 @@ describe("onAudioPacket", () => {
     expect(app.__get("audioTs")).toBe(tsBefore + 20000);
   });
 
-  it("decode lançando chama resetAudioDecoder", () => {
+  it("a throwing decode calls resetAudioDecoder", () => {
     app.ensureAudioDecoder();
     const ad = app.__get("audioDecoder");
     ad.decode = () => { throw new Error("audio decode fail"); };
@@ -721,7 +721,7 @@ describe("onAudioPacket", () => {
     expect(app.__get("audioDecoder")).toBeNull();
   });
 
-  it("acumula audioBytes e audioPkts", () => {
+  it("accumulates audioBytes and audioPkts", () => {
     const buf = new ArrayBuffer(20);
     app.onAudioPacket(buf);
     expect(app.__get("audioBytes")).toBe(20);
@@ -733,22 +733,22 @@ describe("onAudioPacket", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4.4 Conexão de áudio
+// 4.4 Audio connection
 // ---------------------------------------------------------------------------
 
 describe("connectAudio", () => {
-  it("com audioOn=false retorna sem criar socket", () => {
+  it("with audioOn=false returns without creating a socket", () => {
     app.connectAudio();
     expect(globalThis.__sockets).toHaveLength(0);
   });
 
-  it("com audioOn=true cria socket /ws/audio", () => {
+  it("with audioOn=true creates the /ws/audio socket", () => {
     app.setAudio(true);
     const sockets = globalThis.__sockets.filter(s => s.url.includes("/ws/audio"));
     expect(sockets.length).toBeGreaterThan(0);
   });
 
-  it("onmessage com audioOn=true chama onAudioPacket", () => {
+  it("onmessage with audioOn=true calls onAudioPacket", () => {
     vi.useFakeTimers();
     app.setAudio(true);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/audio"));
@@ -758,7 +758,7 @@ describe("connectAudio", () => {
     vi.useRealTimers();
   });
 
-  it("onclose com audioOn=true agenda reconexão", () => {
+  it("onclose with audioOn=true schedules a reconnect", () => {
     vi.useFakeTimers();
     app.setAudio(true);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/audio"));
@@ -769,9 +769,9 @@ describe("connectAudio", () => {
     vi.useRealTimers();
   });
 
-  it("onclose com audioOn=false não reconecta", () => {
+  it("onclose with audioOn=false does not reconnect", () => {
     vi.useFakeTimers();
-    // setAudio(true) cria socket, setAudio(false) fecha e dispara onclose com audioOn=false
+    // setAudio(true) creates the socket, setAudio(false) closes it and fires onclose with audioOn=false
     app.setAudio(true);
     const countAfterTrue = globalThis.__sockets.length;
     app.setAudio(false); // triggers onclose with audioOn=false
@@ -780,7 +780,7 @@ describe("connectAudio", () => {
     vi.useRealTimers();
   });
 
-  it("onerror chama ws.close()", () => {
+  it("onerror calls ws.close()", () => {
     app.setAudio(true);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/audio"));
     const closeSpy = vi.spyOn(ws, "close");
@@ -788,7 +788,7 @@ describe("connectAudio", () => {
     expect(closeSpy).toHaveBeenCalled();
   });
 
-  it("onerror com close() lançando é silenciado", () => {
+  it("onerror with a throwing close() is swallowed", () => {
     app.setAudio(true);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/audio"));
     ws.close = () => { throw new Error("close boom"); };
@@ -797,14 +797,14 @@ describe("connectAudio", () => {
 });
 
 describe("setAudio", () => {
-  it("setAudio(true): botão 'on', startAudioContext, socket", () => {
+  it("setAudio(true): button 'on', startAudioContext, socket", () => {
     app.setAudio(true);
     expect(document.getElementById("sound").classList.contains("on")).toBe(true);
     expect(app.__get("audioCtx")).not.toBeNull();
     expect(globalThis.__sockets.some(s => s.url.includes("/ws/audio"))).toBe(true);
   });
 
-  it("setAudio(false): botão sem 'on', suspend", () => {
+  it("setAudio(false): button without 'on', suspend", () => {
     app.setAudio(true);
     const ctx = app.__get("audioCtx");
     const suspendSpy = vi.spyOn(ctx, "suspend");
@@ -814,11 +814,11 @@ describe("setAudio", () => {
     expect(app.__get("audioDecoder")).toBeNull();
   });
 
-  it("setAudio(false) com audioCtx null não levanta", () => {
+  it("setAudio(false) with a null audioCtx does not throw", () => {
     expect(() => app.setAudio(false)).not.toThrow();
   });
 
-  it("setAudio(false): close() lançando é silenciado", () => {
+  it("setAudio(false): a throwing close() is swallowed", () => {
     app.setAudio(true);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/audio"));
     ws.close = () => { throw new Error("close boom"); };
@@ -827,11 +827,11 @@ describe("setAudio", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4.5 Conexão vídeo/input
+// 4.5 Video/input connection
 // ---------------------------------------------------------------------------
 
 describe("connect", () => {
-  it("adiciona 'hidden' ao overlay e cria 2 sockets", () => {
+  it("adds 'hidden' to the overlay and creates 2 sockets", () => {
     const overlay = document.getElementById("overlay");
     overlay.classList.remove("hidden");
     app.connect();
@@ -841,44 +841,44 @@ describe("connect", () => {
 });
 
 describe("connectVideo", () => {
-  it("cria socket /ws/video com binaryType arraybuffer", () => {
+  it("creates the /ws/video socket with binaryType arraybuffer", () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     expect(ws).toBeDefined();
     expect(ws.binaryType).toBe("arraybuffer");
   });
 
-  it("onmessage string 'reset' chama resetDecoder", () => {
+  it("onmessage string 'reset' calls resetDecoder", () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
-    // Primeiro configura o decoder para ter algo para resetar
+    // First configure the decoder so there is something to reset
     app.onAU(new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer);
     ws.onmessage({ data: JSON.stringify({ t: "reset" }) });
     expect(app.__get("decoder")).toBeNull();
   });
 
-  it("onmessage string JSON inválida é silenciada", () => {
+  it("onmessage with an invalid JSON string is swallowed", () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
-    expect(() => ws.onmessage({ data: "não é json" })).not.toThrow();
+    expect(() => ws.onmessage({ data: "not json" })).not.toThrow();
   });
 
-  it("onmessage string JSON válida mas t !== 'reset' não chama resetDecoder", async () => {
+  it("onmessage with valid JSON but t !== 'reset' does not call resetDecoder", async () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     app.onAU(new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer);
-    await new Promise((r) => setTimeout(r, 0)); // espera config async
+    await new Promise((r) => setTimeout(r, 0)); // waits for the async config
     ws.onmessage({ data: JSON.stringify({ t: "outro" }) });
-    // decoder NÃO foi resetado (configured ainda true)
+    // decoder was NOT reset (configured still true)
     expect(app.__get("configured")).toBe(true);
   });
 
-  it("onmessage ArrayBuffer chama onAU", async () => {
+  it("onmessage ArrayBuffer calls onAU", async () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     const au = new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer;
     ws.onmessage({ data: au });
-    await new Promise((r) => setTimeout(r, 0)); // espera config async
+    await new Promise((r) => setTimeout(r, 0)); // waits for the async config
     expect(app.__get("configured")).toBe(true);
   });
 
@@ -889,11 +889,11 @@ describe("connectVideo", () => {
     app.onAU(new Uint8Array([0, 0, 1, 0x67, 0x64, 0x00, 0x1f, 0, 0, 1, 0x65, 0x01]).buffer);
     ws.onclose();
     expect(app.__get("decoder")).toBeNull();
-    expect(document.getElementById("status").textContent).toMatch(/desconectado|reconectando/);
+    expect(document.getElementById("status").textContent).toMatch(/disconnected|reconnecting/);
     vi.useRealTimers();
   });
 
-  it("onclose com visibilityState=visible → reconnect após timer", () => {
+  it("onclose with visibilityState=visible → reconnects after the timer", () => {
     vi.useFakeTimers();
     Object.defineProperty(document, "visibilityState", {
       value: "visible", configurable: true,
@@ -907,7 +907,7 @@ describe("connectVideo", () => {
     vi.useRealTimers();
   });
 
-  it("onclose com visibilityState=hidden → NÃO reconecta", () => {
+  it("onclose with visibilityState=hidden → does NOT reconnect", () => {
     vi.useFakeTimers();
     Object.defineProperty(document, "visibilityState", {
       value: "hidden", configurable: true,
@@ -919,13 +919,13 @@ describe("connectVideo", () => {
     vi.runAllTimers();
     expect(globalThis.__sockets.length).toBe(countBefore);
     vi.useRealTimers();
-    // Restaura
+    // Restore
     Object.defineProperty(document, "visibilityState", {
       value: "visible", configurable: true,
     });
   });
 
-  it("onerror chama ws.close()", () => {
+  it("onerror calls ws.close()", () => {
     app.connectVideo();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/video"));
     const closeSpy = vi.spyOn(ws, "close");
@@ -935,13 +935,13 @@ describe("connectVideo", () => {
 });
 
 describe("connectInput", () => {
-  it("cria socket /ws/input", () => {
+  it("creates the /ws/input socket", () => {
     app.connectInput();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     expect(ws).toBeDefined();
   });
 
-  it("onclose agenda reconexão", () => {
+  it("onclose schedules a reconnect", () => {
     vi.useFakeTimers();
     app.connectInput();
     const countBefore = globalThis.__sockets.length;
@@ -954,7 +954,7 @@ describe("connectInput", () => {
 });
 
 describe("sendInput", () => {
-  it("com readyState=1 envia JSON", () => {
+  it("with readyState=1 sends JSON", () => {
     app.connectInput();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     app.sendInput({ t: "test", x: 0.5 });
@@ -962,11 +962,11 @@ describe("sendInput", () => {
     expect(JSON.parse(ws.sent[0])).toEqual({ t: "test", x: 0.5 });
   });
 
-  it("com inputWS null não levanta", () => {
+  it("with a null inputWS does not throw", () => {
     expect(() => app.sendInput({ t: "test" })).not.toThrow();
   });
 
-  it("com readyState !== 1 não envia", () => {
+  it("with readyState !== 1 does not send", () => {
     app.connectInput();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.readyState = 3;
@@ -984,29 +984,29 @@ describe("Mouse events", () => {
     app.connectInput();
   });
 
-  it("flushMove com pendingMove envia e zera", () => {
+  it("flushMove with a pendingMove sends and clears it", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    // Produz um pendingMove via mousemove sem pointer lock
+    // Produces a pendingMove via mousemove without pointer lock
     const canvas = document.getElementById("screen");
     canvas.dispatchEvent(new MouseEvent("mousemove", { clientX: 960, clientY: 540, bubbles: true }));
     app.flushMove();
     expect(ws.sent.length).toBeGreaterThan(0);
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
     expect(msg.t).toBe("m");
-    // depois de flush, pendingMove = null
+    // after the flush, pendingMove = null
     const sentBefore = ws.sent.length;
     app.flushMove();
-    expect(ws.sent.length).toBe(sentBefore); // não enviou nada extra
+    expect(ws.sent.length).toBe(sentBefore); // sent nothing extra
   });
 
-  it("flushMove sem pendingMove não envia, mas chama rAF", () => {
+  it("flushMove without a pendingMove does not send, but calls rAF", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     app.flushMove();
     expect(ws.sent).toHaveLength(0);
     expect(globalThis.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it("mousemove sem pointer lock → pendingMove com t:m", () => {
+  it("mousemove without pointer lock → pendingMove with t:m", () => {
     const canvas = document.getElementById("screen");
     canvas.dispatchEvent(new MouseEvent("mousemove", { clientX: 960, clientY: 540, bubbles: true }));
     const pm = app.__get("pendingMove");
@@ -1015,7 +1015,7 @@ describe("Mouse events", () => {
     expect(pm.x).toBeCloseTo(0.5);
   });
 
-  it("mousemove com pointer lock → envia t:mr via sendInput", () => {
+  it("mousemove with pointer lock → sends t:mr via sendInput", () => {
     const canvas = document.getElementById("screen");
     Object.defineProperty(document, "pointerLockElement", {
       get: () => canvas, configurable: true,
@@ -1028,13 +1028,13 @@ describe("Mouse events", () => {
     }));
     const sent = ws.sent.map(s => JSON.parse(s));
     expect(sent.some(m => m.t === "mr")).toBe(true);
-    // Restaura
+    // Restore
     Object.defineProperty(document, "pointerLockElement", {
       get: () => null, configurable: true,
     });
   });
 
-  it("mousedown envia t:md e preventDefault", () => {
+  it("mousedown sends t:md and calls preventDefault", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const ev = new MouseEvent("mousedown", { button: 2, bubbles: true, cancelable: true });
@@ -1043,7 +1043,7 @@ describe("Mouse events", () => {
     expect(msg).toEqual({ t: "md", b: 2 });
   });
 
-  it("mouseup envia t:mu", () => {
+  it("mouseup sends t:mu", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     canvas.dispatchEvent(new MouseEvent("mouseup", { button: 0, bubbles: true, cancelable: true }));
@@ -1051,7 +1051,7 @@ describe("Mouse events", () => {
     expect(msg).toEqual({ t: "mu", b: 0 });
   });
 
-  it("contextmenu chama preventDefault sem enviar", () => {
+  it("contextmenu calls preventDefault without sending", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sentBefore = ws.sent.length;
@@ -1060,7 +1060,7 @@ describe("Mouse events", () => {
     expect(ws.sent.length).toBe(sentBefore);
   });
 
-  it("wheel envia t:w com sign(delta)", () => {
+  it("wheel sends t:w with sign(delta)", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     canvas.dispatchEvent(new WheelEvent("wheel", { deltaX: 5, deltaY: -3, bubbles: true, cancelable: true }));
@@ -1068,7 +1068,7 @@ describe("Mouse events", () => {
     expect(msg).toEqual({ t: "w", x: 1, y: -1 });
   });
 
-  it("wheel com deltas zero → x:0, y:0", () => {
+  it("wheel with zero deltas → x:0, y:0", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     canvas.dispatchEvent(new WheelEvent("wheel", { deltaX: 0, deltaY: 0, bubbles: true, cancelable: true }));
@@ -1094,7 +1094,7 @@ describe("Touch events", () => {
     return { identifier: id, clientX: x, clientY: y };
   }
 
-  it("touchstart com 1 toque envia t:m e zera touchMoved", () => {
+  it("touchstart with 1 touch sends t:m and clears touchMoved", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const touch = makeTouch(1, 960, 540);
@@ -1107,7 +1107,7 @@ describe("Touch events", () => {
     expect(app.__get("touchMoved")).toBe(false);
   });
 
-  it("touchstart com mais de 1 toque retorna sem enviar", () => {
+  it("touchstart with more than 1 touch returns without sending", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sentBefore = ws.sent.length;
@@ -1119,14 +1119,14 @@ describe("Touch events", () => {
     expect(ws.sent.length).toBe(sentBefore);
   });
 
-  it("touchmove com touchId correto seta pendingMove e touchMoved", () => {
+  it("touchmove with the right touchId sets pendingMove and touchMoved", () => {
     const canvas = document.getElementById("screen");
-    // Primeiro um touchstart para definir touchId
+    // First a touchstart to set touchId
     const touch = makeTouch(42, 100, 100);
     canvas.dispatchEvent(new TouchEvent("touchstart", {
       touches: [touch], changedTouches: [touch], bubbles: true, cancelable: true,
     }));
-    // Agora touchmove com o mesmo identifier
+    // Now a touchmove with the same identifier
     const moveTouch = makeTouch(42, 200, 200);
     canvas.dispatchEvent(new TouchEvent("touchmove", {
       touches: [moveTouch], changedTouches: [moveTouch], bubbles: true, cancelable: true,
@@ -1135,7 +1135,7 @@ describe("Touch events", () => {
     expect(app.__get("pendingMove")).not.toBeNull();
   });
 
-  it("touchmove com identifier diferente não tem efeito", () => {
+  it("touchmove with a different identifier has no effect", () => {
     const canvas = document.getElementById("screen");
     const touch = makeTouch(1, 100, 100);
     canvas.dispatchEvent(new TouchEvent("touchstart", {
@@ -1150,7 +1150,7 @@ describe("Touch events", () => {
     expect(app.__get("touchMoved")).toBe(false);
   });
 
-  it("touchend sem mover envia md então mu após 40ms", () => {
+  it("touchend without moving sends md, then mu after 40ms", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const touch = makeTouch(1, 100, 100);
@@ -1160,24 +1160,24 @@ describe("Touch events", () => {
     canvas.dispatchEvent(new TouchEvent("touchend", {
       touches: [], changedTouches: [touch], bubbles: true, cancelable: true,
     }));
-    // md enviado imediatamente
+    // md sent immediately
     const msgs = ws.sent.map(s => JSON.parse(s));
     expect(msgs.some(m => m.t === "md" && m.b === 0)).toBe(true);
-    // mu enviado após timer
+    // mu sent after the timer
     vi.advanceTimersByTime(40);
     const msgs2 = ws.sent.map(s => JSON.parse(s));
     expect(msgs2.some(m => m.t === "mu" && m.b === 0)).toBe(true);
     expect(app.__get("touchId")).toBeNull();
   });
 
-  it("touchend com touchMoved=true não envia md/mu", () => {
+  it("touchend with touchMoved=true does not send md/mu", () => {
     const canvas = document.getElementById("screen");
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const touch = makeTouch(1, 100, 100);
     canvas.dispatchEvent(new TouchEvent("touchstart", {
       touches: [touch], changedTouches: [touch], bubbles: true, cancelable: true,
     }));
-    // Simula movimento
+    // Simulates movement
     canvas.dispatchEvent(new TouchEvent("touchmove", {
       touches: [makeTouch(1, 200, 200)], changedTouches: [makeTouch(1, 200, 200)],
       bubbles: true, cancelable: true,
@@ -1187,23 +1187,23 @@ describe("Touch events", () => {
       touches: [], changedTouches: [touch], bubbles: true, cancelable: true,
     }));
     vi.advanceTimersByTime(40);
-    // Nenhum md/mu extra
+    // No extra md/mu
     const newMsgs = ws.sent.slice(sentBefore).map(s => JSON.parse(s));
     expect(newMsgs.some(m => m.t === "md" || m.t === "mu")).toBe(false);
   });
 });
 
 // ---------------------------------------------------------------------------
-// 4.8 Teclado
+// 4.8 Keyboard
 // ---------------------------------------------------------------------------
 
 describe("Keyboard events", () => {
   beforeEach(() => {
     app.connectInput();
-    app.setKbdCapture(true); // captura SÓ com foco no canvas; ativamos p/ testar
+    app.setKbdCapture(true); // capture happens ONLY with focus on the canvas; we turn it on to test
   });
 
-  it("sem captura (foco fora do canvas) não envia", () => {
+  it("without capture (focus outside the canvas) does not send", () => {
     app.setKbdCapture(false);
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.sent = [];
@@ -1211,37 +1211,37 @@ describe("Keyboard events", () => {
     expect(ws.sent).toHaveLength(0);
   });
 
-  it("keydown envia t:k down:true", () => {
+  it("keydown sends t:k down:true", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "KeyA", bubbles: true, cancelable: true }));
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
     expect(msg).toEqual({ t: "k", code: "KeyA", down: true });
   });
 
-  it("keyup envia t:k down:false", () => {
+  it("keyup sends t:k down:false", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     window.dispatchEvent(new KeyboardEvent("keyup", { code: "Space", bubbles: true, cancelable: true }));
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
     expect(msg).toEqual({ t: "k", code: "Space", down: false });
   });
 
-  it("F11 é ignorado (return sem enviar)", () => {
+  it("F11 is ignored (returns without sending)", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sentBefore = ws.sent.length;
     window.dispatchEvent(new KeyboardEvent("keydown", { code: "F11", bubbles: true, cancelable: true }));
     expect(ws.sent.length).toBe(sentBefore);
   });
 
-  it("F11 no keyup também é ignorado", () => {
+  it("F11 on keyup is ignored too", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sentBefore = ws.sent.length;
     window.dispatchEvent(new KeyboardEvent("keyup", { code: "F11", bubbles: true, cancelable: true }));
     expect(ws.sent.length).toBe(sentBefore);
   });
 
-  it("sem inputWS não lança", () => {
-    // inputWS é null (não chamamos connectInput neste scope; mas já chamamos no beforeEach)
-    // Forçamos readyState != 1 para testar o branch
+  it("without inputWS does not throw", () => {
+    // inputWS is null (we don't call connectInput in this scope; but beforeEach already did)
+    // We force readyState != 1 to test the branch
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     ws.readyState = 3;
     expect(() =>
@@ -1260,7 +1260,7 @@ describe("Gamepad / pollPads", () => {
     app.connectInput();
   });
 
-  it("sem pad: não envia, chama rAF", () => {
+  it("no pad: does not send, calls rAF", () => {
     navigator.getGamepads = () => [];
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     app.pollPads();
@@ -1268,14 +1268,14 @@ describe("Gamepad / pollPads", () => {
     expect(globalThis.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it("sem getGamepads: usa lista vazia sem lançar", () => {
+  it("without getGamepads: uses an empty list without throwing", () => {
     navigator.getGamepads = undefined;
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     expect(() => app.pollPads()).not.toThrow();
     expect(ws.sent).toHaveLength(0);
   });
 
-  it("pad com axes e buttons: envia t:g", () => {
+  it("pad with axes and buttons: sends t:g", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     navigator.getGamepads = () => [{
       axes: [0.5, -0.5, 1.0, -1.0],
@@ -1290,7 +1290,7 @@ describe("Gamepad / pollPads", () => {
     expect(msg.a).toEqual([0.5, -0.5, 1.0, -1.0]);
   });
 
-  it("estado idêntico: não reenvia (deduplica)", () => {
+  it("identical state: does not resend (dedup)", () => {
     navigator.getGamepads = () => [{
       axes: [0, 0, 0, 0],
       buttons: [{ pressed: false, value: 0 }],
@@ -1299,10 +1299,10 @@ describe("Gamepad / pollPads", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const countAfterFirst = ws.sent.length;
     app.pollPads();
-    expect(ws.sent.length).toBe(countAfterFirst); // não reenviou
+    expect(ws.sent.length).toBe(countAfterFirst); // did not resend
   });
 
-  it("estado mudado: reenvia", () => {
+  it("changed state: resends", () => {
     navigator.getGamepads = () => [{
       axes: [0, 0, 0, 0],
       buttons: [{ pressed: false, value: 0 }],
@@ -1310,7 +1310,7 @@ describe("Gamepad / pollPads", () => {
     app.pollPads();
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const countAfterFirst = ws.sent.length;
-    // Muda estado
+    // Change the state
     navigator.getGamepads = () => [{
       axes: [1, 0, 0, 0],
       buttons: [{ pressed: false, value: 0 }],
@@ -1319,7 +1319,7 @@ describe("Gamepad / pollPads", () => {
     expect(ws.sent.length).toBeGreaterThan(countAfterFirst);
   });
 
-  it("p.axes[i] falsy usa || 0", () => {
+  it("falsy p.axes[i] uses || 0", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     navigator.getGamepads = () => [{
       axes: [0, undefined, NaN, null],
@@ -1330,7 +1330,7 @@ describe("Gamepad / pollPads", () => {
     expect(msg.a).toEqual([0, 0, 0, 0]);
   });
 
-  it("mapping standard: gatilhos REPLICAM o valor cru de buttons[6]/[7]", () => {
+  it("standard mapping: triggers REPLICATE the raw value of buttons[6]/[7]", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
     btns[6] = { pressed: true, value: 0.7 };
@@ -1338,40 +1338,40 @@ describe("Gamepad / pollPads", () => {
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    // fiel: sem deadzone/rescale -> exatamente o que o controle reporta
+    // faithful: no deadzone/rescale -> exactly what the controller reports
     expect(msg.lt).toBe(0.7);
     expect(msg.rt).toBe(0.4);
   });
 
-  it("gatilho leve é replicado fiel (sem deadzone que distorça)", () => {
+  it("a light trigger press is replicated faithfully (no distorting deadzone)", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: true, value: 0.2 }));
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg.lt).toBe(0.2); // valor real preservado, não zerado
+    expect(msg.lt).toBe(0.2); // real value kept, not zeroed
   });
 
-  it("gatilho quase no fundo NÃO é saturado prematuramente", () => {
+  it("a nearly full trigger is NOT saturated early", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: true, value: 0.97 }));
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
-    expect(msg.lt).toBe(0.97); // replica fiel, não força 1
+    expect(msg.lt).toBe(0.97); // faithful replica, does not force 1
   });
 
-  it("gatilho acima de 1 é clampado em 1", () => {
+  it("a trigger above 1 is clamped to 1", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
-    btns[6] = { pressed: true, value: 1.3 }; // fonte fora de faixa
+    btns[6] = { pressed: true, value: 1.3 }; // source out of range
     navigator.getGamepads = () => [{ mapping: "standard", axes: [0, 0, 0, 0], buttons: btns }];
     app.pollPads();
     const msg = JSON.parse(ws.sent[ws.sent.length - 1]);
     expect(msg.lt).toBe(1);
   });
 
-  it("gatilho negativo/NaN cai pra 0 (clamp), sem inventar valor", () => {
+  it("a negative/NaN trigger falls to 0 (clamp), without inventing a value", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const btns = Array.from({ length: 8 }, () => ({ pressed: false, value: 0 }));
     btns[6] = { pressed: false, value: -0.2 };
@@ -1383,9 +1383,9 @@ describe("Gamepad / pollPads", () => {
     expect(msg.rt).toBe(0);
   });
 
-  it("sem perfil NÃO inventa gatilho a partir de eixos extras", () => {
+  it("without a profile does NOT invent a trigger from extra axes", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
-    // controle que repousa o eixo do gatilho em 0 -> não pode virar 0.5 fantasma
+    // a controller that rests the trigger axis at 0 -> must not become a phantom 0.5
     navigator.getGamepads = () => [{
       mapping: "",
       axes: [0, 0, 0, 0, 0, 0],
@@ -1397,11 +1397,11 @@ describe("Gamepad / pollPads", () => {
     expect(msg.rt).toBe(0);
   });
 
-  it("PS2 USB com eixo de gatilho inválido cai pra 0", () => {
+  it("PS2 USB with an invalid trigger axis falls to 0", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     navigator.getGamepads = () => [{
       mapping: "",
-      axes: [0, 0, 0, 0, undefined, NaN], // eixos de gatilho inválidos -> || 0
+      axes: [0, 0, 0, 0, undefined, NaN], // invalid trigger axes -> || 0
       buttons: Array.from({ length: 12 }, () => ({ pressed: false, value: 0 })),
     }];
     app.pollPads();
@@ -1410,16 +1410,16 @@ describe("Gamepad / pollPads", () => {
     expect(msg.rt).toBe(0);
   });
 
-  it("gamepadconnected event chama setStatus", () => {
+  it("gamepadconnected event calls setStatus", () => {
     const ev = new Event("gamepadconnected");
     ev.gamepad = { id: "Xbox 360 Controller (XInput STANDARD GAMEPAD)" };
     window.dispatchEvent(ev);
-    expect(document.getElementById("status").textContent).toContain("controle:");
+    expect(document.getElementById("status").textContent).toContain("controller:");
   });
 });
 
 // ---------------------------------------------------------------------------
-// 4.9b Remapeamento de gamepad (PS2/USB) + perfil salvo no servidor
+// 4.9b Gamepad remapping (PS2/USB) + profile saved on the server
 // ---------------------------------------------------------------------------
 
 describe("gamepad remap / mapPad", () => {
@@ -1431,46 +1431,46 @@ describe("gamepad remap / mapPad", () => {
     ...over,
   });
 
-  it("loadGamepadMaps busca o perfil do servidor", async () => {
+  it("loadGamepadMaps fetches the profile from the server", async () => {
     globalThis.fetch = vi.fn(async () => ({ json: async () => ({ Pad: { buttons: { a: 3 } } }) }));
     await app.loadGamepadMaps();
     expect(app.__get("padMaps").Pad.buttons.a).toBe(3);
   });
 
-  it("loadGamepadMaps falhando: padMaps vira {}", async () => {
+  it("loadGamepadMaps failing: padMaps becomes {}", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
     await app.loadGamepadMaps();
     expect(app.__get("padMaps")).toEqual({});
   });
 
-  it("readSource: botão, eixo normalizado e ausência", () => {
+  it("readSource: button, normalized axis and missing source", () => {
     const p = mkPad({ axes: [0, 0, 0, 0, 0.5], buttons: [{ pressed: true, value: 0.8 }] });
     expect(app.readSource(p, { src: "button", i: 0 })).toBeCloseTo(0.8, 2);
-    // eixo 0.5 em [-1..1] -> 0.75
+    // axis 0.5 in [-1..1] -> 0.75
     expect(app.readSource(p, { src: "axis", i: 4 })).toBeCloseTo(0.75, 2);
     expect(app.readSource(p, null)).toBe(0);
-    expect(app.readSource(p, { src: "button", i: 99 })).toBe(0); // ausente
+    expect(app.readSource(p, { src: "button", i: 99 })).toBe(0); // missing
     expect(app.readSource(p, { src: "axis", i: 99 })).toBe(0);   // NaN/undefined
   });
 
-  it("mapPad sem perfil: gatilhos só de buttons[6]/[7] (não inventa de eixos)", () => {
+  it("mapPad without a profile: triggers only from buttons[6]/[7] (none invented from axes)", () => {
     const p = mkPad({
       axes: [0.1, 0.2, 0.3, 0.4, 1.0, -1.0],
       buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 6, value: i === 6 ? 1 : 0 })),
     });
     const r = app.mapPad(p);
     expect(r.a).toEqual([0.1, 0.2, 0.3, 0.4]);
-    expect(r.lt).toBe(1);   // button[6] no fundo
-    expect(r.rt).toBe(0);   // sem perfil, eixo extra NÃO vira gatilho
+    expect(r.lt).toBe(1);   // button[6] fully pressed
+    expect(r.rt).toBe(0);   // without a profile, an extra axis does NOT become a trigger
   });
 
-  it("mapPad com perfil: reordena botões/eixos e calibra gatilhos", async () => {
-    // injeta um perfil pro id do pad. Gatilho rt como eixo que repousa em 0 e
-    // vai a 1 (min=0,max=1): em repouso deve dar 0, não 0.5.
+  it("mapPad with a profile: reorders buttons/axes and calibrates triggers", async () => {
+    // injects a profile for the pad id. Trigger rt as an axis that rests at 0 and
+    // goes to 1 (min=0,max=1): at rest it must give 0, not 0.5.
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         "Twin USB Joystick": {
-          buttons: { a: 2, b: 1 },           // A está no índice bruto 2
+          buttons: { a: 2, b: 1 },           // A is at raw index 2
           axes: { lx: 3, ly: 0 },
           triggers: { lt: { src: "button", i: 6 }, rt: { src: "axis", i: 5, min: 0, max: 1 } },
         },
@@ -1482,12 +1482,12 @@ describe("gamepad remap / mapPad", () => {
       buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 2, value: i === 2 ? 1 : (i === 6 ? 0.5 : 0) })),
     });
     const r = app.mapPad(p);
-    expect(r.b[0]).toEqual({ p: true, v: 1 });   // 'a' lógico <- bruto 2
-    expect(r.a[0]).toBeCloseTo(0.9, 2);          // lx <- eixo 3
-    expect(r.lt).toBe(0.5);                       // button bruto 6 replicado fiel
-    expect(r.rt).toBe(1);                        // eixo 5 (0->1) no fundo
+    expect(r.b[0]).toEqual({ p: true, v: 1 });   // logical 'a' <- raw 2
+    expect(r.a[0]).toBeCloseTo(0.9, 2);          // lx <- axis 3
+    expect(r.lt).toBe(0.5);                       // raw button 6 replicated faithfully
+    expect(r.rt).toBe(1);                        // axis 5 (0->1) fully pressed
 
-    // mesmo controle em REPOUSO (eixo 5 = 0) -> gatilho rt deve ser 0
+    // same controller at REST (axis 5 = 0) -> trigger rt must be 0
     const idle = mkPad({
       axes: [0, 0, 0, 0, 0, 0],
       buttons: Array.from({ length: 8 }, () => ({ pressed: false, value: 0 })),
@@ -1495,26 +1495,26 @@ describe("gamepad remap / mapPad", () => {
     expect(app.mapPad(idle).rt).toBe(0);
   });
 
-  it("controle STANDARD (Xbox) passa DIRETO e ignora qualquer perfil salvo", async () => {
-    // mesmo havendo um perfil salvo pra esse id, mapping=standard usa passthrough
+  it("a STANDARD controller (Xbox) passes STRAIGHT through and ignores any saved profile", async () => {
+    // even with a saved profile for this id, mapping=standard uses passthrough
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({ "Xbox Wireless Controller": { buttons: { a: 9 } } }),
     }));
     await app.loadGamepadMaps();
     const btns = Array.from({ length: 17 }, (_, i) => ({ pressed: i === 0, value: i === 0 ? 1 : 0 }));
-    btns[6] = { pressed: true, value: 0.5 };  // LT analógico
+    btns[6] = { pressed: true, value: 0.5 };  // analog LT
     const p = {
       id: "Xbox Wireless Controller", mapping: "standard",
       axes: [0.1, 0.2, 0.3, 0.4], buttons: btns,
     };
     const r = app.mapPad(p);
-    expect(r.b[0]).toEqual({ p: true, v: 1 });   // A direto (não reembaralhado p/ idx 9)
+    expect(r.b[0]).toEqual({ p: true, v: 1 });   // A straight through (not reshuffled to idx 9)
     expect(r.a).toEqual([0.1, 0.2, 0.3, 0.4]);
     expect(r.lt).toBe(0.5);
     expect(r.rt).toBe(0);
   });
 
-  it("passthroughPad replica eixos e botões 1:1", () => {
+  it("passthroughPad replicates axes and buttons 1:1", () => {
     const p = {
       mapping: "standard", axes: [0.5, -0.5, 0, 1],
       buttons: Array.from({ length: 8 }, (_, i) => ({ pressed: i === 7, value: i === 7 ? 0.9 : 0 })),
@@ -1524,29 +1524,29 @@ describe("gamepad remap / mapPad", () => {
     expect(r.rt).toBe(0.9); // buttons[7]
   });
 
-  it("não-standard SEM perfil cai no passthrough (melhor esforço)", () => {
+  it("non-standard WITHOUT a profile falls back to passthrough (best effort)", () => {
     const p = mkPad({ buttons: Array.from({ length: 4 }, (_, i) => ({ pressed: i === 1, value: i === 1 ? 1 : 0 })) });
-    const r = app.mapPad(p); // padMaps vazio pra esse id
+    const r = app.mapPad(p); // padMaps empty for this id
     expect(r.b[1]).toEqual({ p: true, v: 1 });
   });
 
-  it("startRemap em controle standard é bloqueado (não precisa)", () => {
+  it("startRemap on a standard controller is blocked (not needed)", () => {
     navigator.getGamepads = () => [{
       id: "Xbox", mapping: "standard", axes: [0, 0, 0, 0],
       buttons: Array.from({ length: 17 }, () => ({ pressed: false, value: 0 })),
     }];
     app.startRemap();
     expect(app.__get("remapState").active).toBe(false);
-    expect(document.getElementById("status").textContent).toMatch(/padrão|direto/i);
+    expect(document.getElementById("status").textContent).toMatch(/standard|straight/i);
   });
 
-  it("clearRemap apaga o perfil (servidor + memória)", async () => {
+  it("clearRemap deletes the profile (server + memory)", async () => {
     const calls = [];
     globalThis.fetch = vi.fn(async (url, opts) => {
       calls.push(opts?.method);
       return { json: async () => ({ ok: true, removed: true }) };
     });
-    // injeta um perfil em memória
+    // injects an in-memory profile
     globalThis.fetch = vi.fn(async () => ({ json: async () => ({ "Twin USB Joystick": { buttons: {} } }) }));
     await app.loadGamepadMaps();
     expect(app.__get("padMaps")["Twin USB Joystick"]).toBeDefined();
@@ -1558,7 +1558,7 @@ describe("gamepad remap / mapPad", () => {
     expect(del).toContain("DELETE");
   });
 
-  it("clearRemap sem pad avisa e não chama o servidor", async () => {
+  it("clearRemap without a pad warns and does not call the server", async () => {
     navigator.getGamepads = () => [];
     let called = false;
     globalThis.fetch = vi.fn(async () => { called = true; return { json: async () => ({}) }; });
@@ -1566,37 +1566,37 @@ describe("gamepad remap / mapPad", () => {
     expect(called).toBe(false);
   });
 
-  it("clearRemap com erro de rede não lança", async () => {
+  it("clearRemap with a network error does not throw", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
     navigator.getGamepads = () => [mkPad()];
     await expect(app.clearRemap()).resolves.not.toThrow();
   });
 
-  it("botão #remapClear chama clearRemap", () => {
+  it("#remapClear button calls clearRemap", () => {
     navigator.getGamepads = () => [];
     expect(() => document.getElementById("remapClear").click()).not.toThrow();
   });
 
-  it("startRemap sem pad: avisa e não abre", () => {
+  it("startRemap without a pad: warns and does not open", () => {
     navigator.getGamepads = () => [];
     app.startRemap();
     expect(document.getElementById("remap").classList.contains("hidden")).toBe(true);
     expect(app.__get("remapState").active).toBe(false);
   });
 
-  it("startRemap sem getGamepads disponível não lança", () => {
+  it("startRemap without getGamepads available does not throw", () => {
     navigator.getGamepads = undefined;
     expect(() => app.startRemap()).not.toThrow();
     expect(app.__get("remapState").active).toBe(false);
   });
 
-  it("readSource com range degenerado (max==min) não divide por zero", () => {
+  it("readSource with a degenerate range (max==min) does not divide by zero", () => {
     const p = mkPad({ axes: [0, 0, 0, 0, 0.5] });
     const v = app.readSource(p, { src: "axis", i: 4, min: 1, max: 1 });
     expect(Number.isFinite(v)).toBe(true);
   });
 
-  it("applyDetection: botão lógico detectado como eixo (caso raro)", () => {
+  it("applyDetection: logical button detected as an axis (rare case)", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     app.applyDetection({ kind: "button", name: "a" }, { src: "axis", i: 4 });
@@ -1604,32 +1604,32 @@ describe("gamepad remap / mapPad", () => {
     app.cancelRemap();
   });
 
-  it("detectChange com base sem aquele índice (?? 0)", () => {
+  it("detectChange with a base missing that index (?? 0)", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
-    // força base curta -> base.buttons[i]/axes[i] indefinidos -> ?? 0
+    // forces a short base -> base.buttons[i]/axes[i] undefined -> ?? 0
     app.__get("remapState").base = { buttons: [], axes: [] };
     const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, 0.9] }));
     expect(found).not.toBeNull();
     app.cancelRemap();
   });
 
-  it("detectChange com eixo negativo guarda repouso e valor pressionado", () => {
+  it("detectChange with a negative axis keeps the resting and pressed values", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, -0.9] }));
     expect(found.src).toBe("axis");
     expect(found.i).toBe(4);
-    expect(found.rest).toBe(0);    // repouso
-    expect(found.cur).toBe(-0.9);  // valor ao acionar (eixo invertido)
+    expect(found.rest).toBe(0);    // rest
+    expect(found.cur).toBe(-0.9);  // value when pressed (inverted axis)
     app.cancelRemap();
   });
 
-  it("detectChange: eixo que repousava alto e foi a 0 (cur falsy -> || 0)", () => {
+  it("detectChange: an axis that rested high and went to 0 (falsy cur -> || 0)", () => {
     const resting = mkPad({ axes: [0, 0, 0, 0, 0.9] });
     navigator.getGamepads = () => [resting];
-    app.startRemap(); // base.axes[4] = 0.9 (repouso alto)
-    // agora o eixo 4 vai pra 0 explícito (v=0 -> `v || 0`)
+    app.startRemap(); // base.axes[4] = 0.9 (high rest)
+    // now axis 4 goes to an explicit 0 (v=0 -> `v || 0`)
     const found = app.detectChange(mkPad({ axes: [0, 0, 0, 0, 0] }));
     expect(found.src).toBe("axis");
     expect(found.i).toBe(4);
@@ -1637,7 +1637,7 @@ describe("gamepad remap / mapPad", () => {
     app.cancelRemap();
   });
 
-  it("startRemap com pad: abre overlay e fica ativo", () => {
+  it("startRemap with a pad: opens the overlay and stays active", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     expect(document.getElementById("remap").classList.contains("hidden")).toBe(false);
@@ -1646,27 +1646,27 @@ describe("gamepad remap / mapPad", () => {
     expect(document.getElementById("remap").classList.contains("hidden")).toBe(true);
   });
 
-  it("detectChange acha o controle que mais mudou (botão e eixo)", () => {
-    app.__get("remapState"); // garante módulo carregado
+  it("detectChange finds the control that changed the most (button and axis)", () => {
+    app.__get("remapState"); // makes sure the module is loaded
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     const base = mkPad();
-    // botão 3 apertado
+    // button 3 pressed
     let found = app.detectChange(mkPad({ buttons: base.buttons.map((b, i) => i === 3 ? { pressed: true, value: 1 } : b) }));
     expect(found).toEqual({ src: "button", i: 3 });
-    // eixo 2 movido
+    // axis 2 moved
     found = app.detectChange(mkPad({ axes: [0, 0, 0.9, 0] }));
     expect(found.src).toBe("axis");
     expect(found.i).toBe(2);
     app.cancelRemap();
   });
 
-  it("applyDetection grava no draft por tipo de passo", () => {
+  it("applyDetection writes to the draft by step kind", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     app.applyDetection({ kind: "button", name: "a" }, { src: "button", i: 5 });
     app.applyDetection({ kind: "axis", name: "lx" }, { src: "axis", i: 3 });
-    // gatilho como eixo: grava min=repouso e max=pressionado medidos
+    // trigger as an axis: writes the measured min=rest and max=pressed
     app.applyDetection({ kind: "trigger", name: "lt" }, { src: "axis", i: 4, rest: 0, cur: 1 });
     app.applyDetection({ kind: "trigger", name: "rt" }, { src: "button", i: 7 });
     const d = app.__get("remapState").draft;
@@ -1677,7 +1677,7 @@ describe("gamepad remap / mapPad", () => {
     app.cancelRemap();
   });
 
-  it("skipRemapStep avança e no fim finaliza+salva", async () => {
+  it("skipRemapStep advances and at the end finishes+saves", async () => {
     const posts = [];
     globalThis.fetch = vi.fn(async (url, opts) => {
       if (opts && opts.method === "POST") { posts.push(JSON.parse(opts.body)); return { json: async () => ({ ok: true }) }; }
@@ -1693,72 +1693,72 @@ describe("gamepad remap / mapPad", () => {
     expect(posts[0].id).toBe("Twin USB Joystick");
   });
 
-  it("finishRemap salvando com erro de rede não lança", async () => {
+  it("finishRemap saving with a network error does not throw", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new Error("net")));
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     await expect(app.finishRemap()).resolves.not.toThrow();
-    expect(document.getElementById("status").textContent).toMatch(/falhou ao salvar/);
+    expect(document.getElementById("status").textContent).toMatch(/saving to the server failed/);
   });
 
-  it("remapTick detecta um passo, dá cooldown e avança", () => {
+  it("remapTick detects a step, cools down and advances", () => {
     let live = mkPad();
     navigator.getGamepads = () => [live];
     app.startRemap();
     const st = app.__get("remapState");
     const step0 = st.step;
-    // aperta botão 1 -> remapTick deve capturar e avançar 1 passo
+    // press button 1 -> remapTick must capture it and advance 1 step
     live = mkPad({ buttons: mkPad().buttons.map((b, i) => i === 1 ? { pressed: true, value: 1 } : b) });
     navigator.getGamepads = () => [live];
     app.remapTick();
     expect(app.__get("remapState").step).toBe(step0 + 1);
-    // logo após, está em cooldown: outra mudança não avança
+    // right after, it is in cooldown: another change does not advance
     live = mkPad({ buttons: mkPad().buttons.map((b, i) => i === 2 ? { pressed: true, value: 1 } : b) });
     navigator.getGamepads = () => [live];
     app.remapTick();
-    expect(app.__get("remapState").step).toBe(step0 + 1); // segurou
+    expect(app.__get("remapState").step).toBe(step0 + 1); // held back
     app.cancelRemap();
   });
 
-  it("remapTick inativo retorna na hora", () => {
+  it("inactive remapTick returns right away", () => {
     app.cancelRemap();
     expect(() => app.remapTick()).not.toThrow();
   });
 
-  it("skipRemapStep inativo não faz nada", () => {
+  it("inactive skipRemapStep does nothing", () => {
     app.cancelRemap();
     expect(() => app.skipRemapStep()).not.toThrow();
   });
 
-  it("renderRemap com step fora do range limpa o prompt", () => {
+  it("renderRemap with an out-of-range step clears the prompt", () => {
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
-    app.__get("remapState").step = app.__get("REMAP_STEPS").length; // além do fim
+    app.__get("remapState").step = app.__get("REMAP_STEPS").length; // past the end
     app.renderRemap();
     expect(document.getElementById("remapPrompt").textContent).toBe("");
     app.cancelRemap();
   });
 
-  it("remapTick no último passo finaliza", () => {
+  it("remapTick on the last step finishes", () => {
     globalThis.fetch = vi.fn(async () => ({ json: async () => ({ ok: true }) }));
     navigator.getGamepads = () => [mkPad()];
     app.startRemap();
     const st = app.__get("remapState");
-    st.step = app.__get("REMAP_STEPS").length - 1; // último passo
+    st.step = app.__get("REMAP_STEPS").length - 1; // last step
     const live = mkPad({ axes: [0, 0, 0, 0, 0, 0, 0.9] });
     navigator.getGamepads = () => [live];
     app.remapTick();
     expect(app.__get("remapState").active).toBe(false);
   });
 
-  it("botão #remapBtn dispara startRemap", () => {
+  it("#remapBtn button triggers startRemap", () => {
     navigator.getGamepads = () => [mkPad()];
     document.getElementById("remapBtn").click();
     expect(document.getElementById("remap").classList.contains("hidden")).toBe(false);
     app.cancelRemap();
   });
 
-  it("pollPads não envia enquanto remap está ativo", () => {
+  it("pollPads does not send while the remap is active", () => {
     app.connectInput();
     navigator.getGamepads = () => [mkPad({ buttons: [{ pressed: true, value: 1 }] })];
     app.startRemap();
@@ -1771,34 +1771,34 @@ describe("gamepad remap / mapPad", () => {
 });
 
 // ---------------------------------------------------------------------------
-// 4.10 UI — botões e selects
+// 4.10 UI — buttons and selects
 // ---------------------------------------------------------------------------
 
 describe("UI - setStatus", () => {
-  it("atualiza textContent do #status", () => {
-    app.setStatus("mensagem teste");
-    expect(document.getElementById("status").textContent).toBe("mensagem teste");
+  it("updates #status textContent", () => {
+    app.setStatus("test message");
+    expect(document.getElementById("status").textContent).toBe("test message");
   });
 });
 
-describe("UI - botões", () => {
+describe("UI - buttons", () => {
   beforeEach(() => {
     app.connectInput();
   });
 
-  it("#connect click chama connect (cria 2 sockets adicionais)", () => {
+  it("#connect click calls connect (creates 2 extra sockets)", () => {
     const countBefore = globalThis.__sockets.length;
     document.getElementById("connect").click();
     expect(globalThis.__sockets.length - countBefore).toBe(2);
   });
 
-  it("#lock click chama canvas.requestPointerLock", () => {
+  it("#lock click calls canvas.requestPointerLock", () => {
     const canvas = document.getElementById("screen");
     document.getElementById("lock").click();
     expect(canvas.requestPointerLock).toHaveBeenCalled();
   });
 
-  it("#full click com fullscreenElement null chama requestFullscreen", () => {
+  it("#full click with a null fullscreenElement calls requestFullscreen", () => {
     Object.defineProperty(document, "fullscreenElement", {
       value: null, configurable: true, writable: true,
     });
@@ -1806,7 +1806,7 @@ describe("UI - botões", () => {
     expect(document.documentElement.requestFullscreen).toHaveBeenCalled();
   });
 
-  it("#full click com fullscreenElement não-null chama exitFullscreen", () => {
+  it("#full click with a non-null fullscreenElement calls exitFullscreen", () => {
     Object.defineProperty(document, "fullscreenElement", {
       value: {}, configurable: true, writable: true,
     });
@@ -1814,7 +1814,7 @@ describe("UI - botões", () => {
     expect(document.exitFullscreen).toHaveBeenCalled();
   });
 
-  it("#kbd click abre/fecha o teclado virtual", () => {
+  it("#kbd click opens/closes the virtual keyboard", () => {
     const osk = document.getElementById("osk");
     osk.classList.add("hidden");
     document.getElementById("kbd").click();
@@ -1823,7 +1823,7 @@ describe("UI - botões", () => {
     expect(osk.classList.contains("hidden")).toBe(true);
   });
 
-  it("#menuToggle mostra/esconde a #bar", () => {
+  it("#menuToggle shows/hides #bar", () => {
     const bar = document.getElementById("bar");
     bar.classList.remove("hidden");
     document.getElementById("menuToggle").click();
@@ -1832,8 +1832,8 @@ describe("UI - botões", () => {
     expect(bar.classList.contains("hidden")).toBe(false);
   });
 
-  it("botão de combo envia o chord", () => {
-    // usa o socket ativo (último /ws/input); o beforeEach já chamou connectInput
+  it("a combo button sends the chord", () => {
+    // uses the active socket (last /ws/input); beforeEach already called connectInput
     const inputs = globalThis.__sockets.filter(s => s.url.includes("/ws/input"));
     const ws = inputs[inputs.length - 1];
     ws.sent = [];
@@ -1843,7 +1843,7 @@ describe("UI - botões", () => {
     expect(seq).toContainEqual({ t: "k", code: "F4", down: true });
   });
 
-  it("#sound click chama setAudio(!audioOn)", () => {
+  it("#sound click calls setAudio(!audioOn)", () => {
     expect(app.__get("audioOn")).toBe(false);
     document.getElementById("sound").click();
     expect(app.__get("audioOn")).toBe(true);
@@ -1851,7 +1851,7 @@ describe("UI - botões", () => {
     expect(app.__get("audioOn")).toBe(false);
   });
 
-  it("#preset change envia t:q preset", () => {
+  it("#preset change sends t:q preset", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("preset");
     const opt = document.createElement("option");
@@ -1863,7 +1863,7 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "q", preset: "low" });
   });
 
-  it("#vres change envia t:vq res:número", () => {
+  it("#vres change sends t:vq res:number", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("vres");
     const opt = document.createElement("option");
@@ -1872,7 +1872,7 @@ describe("UI - botões", () => {
     expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", res: 720 });
   });
 
-  it("#vfps change envia t:vq fps:número", () => {
+  it("#vfps change sends t:vq fps:number", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("vfps");
     const opt = document.createElement("option");
@@ -1881,7 +1881,7 @@ describe("UI - botões", () => {
     expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", fps: 90 });
   });
 
-  it("#vbitrate change envia t:vq bitrate:string", () => {
+  it("#vbitrate change sends t:vq bitrate:string", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("vbitrate");
     const opt = document.createElement("option");
@@ -1890,16 +1890,16 @@ describe("UI - botões", () => {
     expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "vq", bitrate: "7M" });
   });
 
-  it("#audioPreset change envia t:aq preset", () => {
+  it("#audioPreset change sends t:aq preset", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("audioPreset");
     const opt = document.createElement("option");
-    opt.value = "baixa"; sel.appendChild(opt); sel.value = "baixa";
+    opt.value = "low"; sel.appendChild(opt); sel.value = "low";
     sel.dispatchEvent(new Event("change"));
-    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "aq", preset: "baixa" });
+    expect(JSON.parse(ws.sent[ws.sent.length - 1])).toEqual({ t: "aq", preset: "low" });
   });
 
-  it("#monitor change com valor numérico envia t:mon i:número", () => {
+  it("#monitor change with a numeric value sends t:mon i:number", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("monitor");
     const opt = document.createElement("option");
@@ -1911,7 +1911,7 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "mon", i: 1 });
   });
 
-  it("#monitor change com valor '' envia t:mon i:null", () => {
+  it("#monitor change with value '' sends t:mon i:null", () => {
     const ws = globalThis.__sockets.find(s => s.url.includes("/ws/input"));
     const sel = document.getElementById("monitor");
     const opt = document.createElement("option");
@@ -1923,7 +1923,7 @@ describe("UI - botões", () => {
     expect(msg).toEqual({ t: "mon", i: null });
   });
 
-  it("foco/blur no canvas liga/desliga a captura de teclado", () => {
+  it("focus/blur on the canvas turns keyboard capture on/off", () => {
     const canvas = document.getElementById("screen");
     canvas.dispatchEvent(new FocusEvent("focus"));
     expect(app.__get("kbdCapture")).toBe(true);
@@ -1937,7 +1937,7 @@ describe("UI - botões", () => {
 // ---------------------------------------------------------------------------
 
 describe("loadConfig", () => {
-  it("normal: preenche presets, monitores e habilita som", async () => {
+  it("normal: fills presets and monitors and enables sound", async () => {
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         presets: ["ultra", "high", "medium", "low", "potato"],
@@ -1952,8 +1952,8 @@ describe("loadConfig", () => {
         fps_options: [30, 60, 120],
         bitrate_options: ["3500k", "7M", "12M"],
         audio_available: true,
-        audio_presets: ["alta", "media", "baixa", "voz"],
-        current_audio_preset: "media",
+        audio_presets: ["high", "medium", "low", "voice"],
+        current_audio_preset: "medium",
         audio_manual: false,
       }),
     }));
@@ -1961,15 +1961,15 @@ describe("loadConfig", () => {
     expect(document.getElementById("preset").options).toHaveLength(5);
     const monOpts = document.getElementById("monitor").options;
     expect(monOpts).toHaveLength(2);
-    // primário recebe ★, o outro não; o current_monitor=1 fica selecionado
+    // the primary gets ★, the other doesn't; current_monitor=1 is selected
     expect(monOpts[0].textContent).toContain("★");
     expect(monOpts[1].textContent).not.toContain("★");
     expect(monOpts[1].selected).toBe(true);
     expect(document.getElementById("sound").disabled).toBe(false);
-    // selected no preset atual
+    // selected on the current preset
     const selected = Array.from(document.getElementById("preset").options).find(o => o.selected);
     expect(selected.value).toBe("high");
-    // controles de vídeo populados e com o valor atual selecionado
+    // video controls filled with the current value selected
     const vres = document.getElementById("vres");
     expect(vres.options).toHaveLength(3);
     expect(Array.from(vres.options).find(o => o.selected).value).toBe("720");
@@ -1978,7 +1978,7 @@ describe("loadConfig", () => {
     expect(document.getElementById("audioPreset").disabled).toBe(false);
   });
 
-  it("áudio indisponível no servidor: desabilita botão com título correto", async () => {
+  it("audio unavailable on the server: disables the button with the right title", async () => {
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         presets: [], current_preset: null, monitors: [], current_monitor: null,
@@ -1988,10 +1988,10 @@ describe("loadConfig", () => {
     await app.loadConfig();
     const btn = document.getElementById("sound");
     expect(btn.disabled).toBe(true);
-    expect(btn.title).toContain("sem áudio no servidor");
+    expect(btn.title).toContain("no audio on the server");
   });
 
-  it("áudio disponível mas sem AudioDecoder: desabilita com título correto", async () => {
+  it("audio available but no AudioDecoder: disables with the right title", async () => {
     delete globalThis.AudioDecoder;
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
@@ -2005,12 +2005,12 @@ describe("loadConfig", () => {
     expect(btn.title).toContain("AudioDecoder");
   });
 
-  it("campos opcionais ausentes: usa listas vazias sem lançar", async () => {
+  it("missing optional fields: uses empty lists without throwing", async () => {
     globalThis.fetch = vi.fn(async () => ({
       json: async () => ({
         presets: [], current_preset: null,
         monitors: [], current_monitor: null,
-        // video, *_options e audio_presets AUSENTES -> fallback || []
+        // video, *_options and audio_presets MISSING -> fallback || []
         audio_available: false,
       }),
     }));
@@ -2019,7 +2019,7 @@ describe("loadConfig", () => {
     expect(document.getElementById("audioPreset").options).toHaveLength(0);
   });
 
-  it("fetch lançando: console.warn é chamado, sem propagação", async () => {
+  it("a throwing fetch: console.warn is called, nothing propagates", async () => {
     globalThis.fetch = vi.fn(() => Promise.reject(new Error("network error")));
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
     await expect(app.loadConfig()).resolves.not.toThrow();
@@ -2033,9 +2033,9 @@ describe("loadConfig", () => {
 // ---------------------------------------------------------------------------
 
 describe("statsLoop", () => {
-  it("dt >= 1 atualiza stats e zera contadores", async () => {
-    // lastStat=0 (definido no load com performance.now=0)
-    // Seta performance.now para retornar 1500 ms depois
+  it("dt >= 1 updates stats and clears counters", async () => {
+    // lastStat=0 (set at load with performance.now=0)
+    // Make performance.now return 1500 ms later
     globalThis.performance.now.mockReturnValue(1500);
     app.statsLoop();
     const text = document.getElementById("stats").textContent;
@@ -2044,14 +2044,14 @@ describe("statsLoop", () => {
     expect(globalThis.requestAnimationFrame).toHaveBeenCalled();
   });
 
-  it("dt >= 1 com audioOn=true mostra 🔊", async () => {
+  it("dt >= 1 with audioOn=true shows 🔊", async () => {
     app.setAudio(true);
     globalThis.performance.now.mockReturnValue(1500);
     app.statsLoop();
     expect(document.getElementById("stats").textContent).toContain("🔊");
   });
 
-  it("dt < 1 não atualiza stats", async () => {
+  it("dt < 1 does not update stats", async () => {
     globalThis.performance.now.mockReturnValue(100);
     app.statsLoop();
     expect(document.getElementById("stats").textContent).toBe("");
@@ -2064,19 +2064,19 @@ describe("statsLoop", () => {
 // ---------------------------------------------------------------------------
 
 describe("boot", () => {
-  it("sem VideoDecoder: status 'Sem WebCodecs', #connect desabilitado, sem fetch", async () => {
+  it("without VideoDecoder: status 'No WebCodecs', #connect disabled, no fetch", async () => {
     delete globalThis.VideoDecoder;
     app = await loadApp();
     app.boot();
-    expect(document.getElementById("status").textContent).toContain("Sem WebCodecs");
+    expect(document.getElementById("status").textContent).toContain("No WebCodecs");
     expect(document.getElementById("connect").disabled).toBe(true);
     expect(globalThis.fetch).not.toHaveBeenCalled();
     expect(globalThis.requestAnimationFrame).not.toHaveBeenCalled();
   });
 
-  it("normal: status 'pronto', fetch chamado, rAF chamado", async () => {
+  it("normal: status 'ready', fetch called, rAF called", async () => {
     app.boot();
-    expect(document.getElementById("status").textContent).toContain("pronto");
+    expect(document.getElementById("status").textContent).toContain("ready");
     expect(globalThis.fetch).toHaveBeenCalled();
     expect(globalThis.requestAnimationFrame).toHaveBeenCalled();
   });

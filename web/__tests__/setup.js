@@ -20,10 +20,10 @@ export function mountDOM() {
     el.id = id;
     document.body.appendChild(el);
   }
-  // #osk e #remap começam escondidos (como no HTML real)
+  // #osk and #remap start hidden (as in the real HTML)
   document.getElementById("osk").className = "hidden";
   document.getElementById("remap").className = "hidden";
-  // botões de combo (data-combo) que app.js liga no boot
+  // combo buttons (data-combo) that app.js wires up at boot
   for (const c of ["altf4", "alttab", "ctrlaltdel", "super"]) {
     const b = document.createElement("button");
     b.dataset.combo = c;
@@ -101,8 +101,8 @@ export function stubBrowser() {
       monitors: [{ index: 0, name: "HDMI-0", primary: true, w: 1920, h: 1080 }],
       current_monitor: null,
       audio_available: false,
-      audio_presets: ["alta", "media", "baixa", "voz"],
-      current_audio_preset: "media",
+      audio_presets: ["high", "medium", "low", "voice"],
+      current_audio_preset: "medium",
       audio_manual: false,
     }),
   }));

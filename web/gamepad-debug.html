@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>remote-link · diagnóstico de gamepad</title>
+  <title data-i18n>LAN Remote Desktop · gamepad diagnostics</title>
   <style>
     body { background:#0b0d10; color:#e7edf3; font:14px ui-monospace,monospace;
            margin:0; padding:16px; }
@@ -26,18 +26,25 @@
   </style>
 </head>
 <body>
-  <h1>Diagnóstico de gamepad</h1>
-  <p>Mexa em TUDO no controle (sticks, gatilhos até o fundo, D-Pad, botões).
-     Os valores que mudam são os índices reais que o navegador reporta.
-     <b>Tire um print disto</b> com os gatilhos LT e RT apertados pela metade.</p>
-  <div id="out">Conecte um controle e aperte qualquer botão…</div>
+  <h1 data-i18n>Gamepad diagnostics</h1>
+  <p data-i18n-html>Move EVERYTHING on the controller (sticks, triggers all the way down, D-Pad,
+     buttons). The values that change are the real indices the browser reports.
+     <b>Take a screenshot of this</b> with the LT and RT triggers half pressed.</p>
+  <div id="out" data-i18n>Connect a controller and press any button…</div>
 
+<script src="/i18n.js"></script>
 <script>
+// Same strings as the main page: English is the key, pt-BR comes from i18n.js.
+const I18N = window.I18N;
+const LANG = I18N.detectLanguage(location.search, navigator.languages || [navigator.language]);
+const t = I18N.translator(LANG);
+I18N.translatePage(document, LANG);
+
 const out = document.getElementById("out");
 
 function pct(v) { return Math.round(v * 100); }
 function bar(v) {
-  const w = Math.max(0, Math.min(100, ((v + 1) / 2) * 100)); // -1..1 -> 0..100 p/ eixos
+  const w = Math.max(0, Math.min(100, ((v + 1) / 2) * 100)); // -1..1 -> 0..100 for axes
   return `<span class="bar" style="width:${w}px"></span>`;
 }
 function barUnit(v) {
@@ -45,8 +52,8 @@ function barUnit(v) {
   return `<span class="bar" style="width:${w}px"></span>`;
 }
 
-// histórico por controle: pra cada botão/eixo, guarda min/max visto e quantas
-// vezes "oscilou" (subiu e desceu). É o que denuncia o gatilho bugado.
+// per-controller history: for each button/axis, keeps the min/max seen and how
+// many times it "oscillated" (went up and down). That is what exposes a buggy trigger.
 const hist = {}; // key: padIndex -> {btn:[{min,max,flips,last,dir}], axis:[...]}
 function track(slot, i, v, store) {
   if (!store[i]) store[i] = { min: v, max: v, flips: 0, last: v, dir: 0 };
@@ -56,7 +63,7 @@ function track(slot, i, v, store) {
   const dv = v - h.last;
   if (Math.abs(dv) > 0.02) {
     const nd = dv > 0 ? 1 : -1;
-    if (h.dir !== 0 && nd !== h.dir) h.flips++; // mudou de direção = oscilação
+    if (h.dir !== 0 && nd !== h.dir) h.flips++; // changed direction = oscillation
     h.dir = nd;
   }
   h.last = v;
@@ -74,13 +81,13 @@ function render() {
     const H = hist[p.index];
     html += `<div class="pad">`;
     html += `<div class="id">id: ${p.id}</div>`;
-    html += `<div>mapping: <span class="map">${p.mapping || "(vazio / NÃO-standard)"}</span>`;
-    html += ` · botões: ${p.buttons.length} · eixos: ${p.axes.length}</div>`;
+    html += `<div>mapping: <span class="map">${p.mapping || t("(empty / NOT standard)")}</span>`;
+    html += ` · ${t("buttons: {buttons} · axes: {axes}", { buttons: p.buttons.length, axes: p.axes.length })}</div>`;
     html += `<div class="cols">`;
 
-    // botões
-    html += `<div class="col"><table><tr><td class="lbl">botão</td><td></td>`
-      + `<td>valor</td><td>min..max</td><td>osc.</td><td></td></tr>`;
+    // buttons
+    html += `<div class="col"><table><tr><td class="lbl">${t("button")}</td><td></td>`
+      + `<td>${t("value")}</td><td>min..max</td><td>osc.</td><td></td></tr>`;
     p.buttons.forEach((b, i) => {
       const h = track("btn", i, b.value, H.btn);
       const cls = b.pressed ? "on" : "off";
@@ -94,9 +101,9 @@ function render() {
     });
     html += `</table></div>`;
 
-    // eixos
-    html += `<div class="col"><table><tr><td class="lbl">eixo</td>`
-      + `<td>valor</td><td>min..max</td><td>osc.</td><td></td></tr>`;
+    // axes
+    html += `<div class="col"><table><tr><td class="lbl">${t("axis")}</td>`
+      + `<td>${t("value")}</td><td>min..max</td><td>osc.</td><td></td></tr>`;
     p.axes.forEach((v, i) => {
       const h = track("axis", i, v ?? 0, H.axis);
       const flip = h.flips > 3 ? `<span class="on">${h.flips}⚠</span>` : h.flips;
@@ -111,10 +118,7 @@ function render() {
     html += `</div></div>`;
   }
   if (any) {
-    html += `<div class="hint">Para um Xbox real esperado: mapping = "standard",
-      btn[6]/btn[7] = gatilhos LT/RT (value de 0 a 1), btn[12..15] = D-Pad,
-      axis[0..3] = sticks. Se o seu mostra mapping vazio e os gatilhos como
-      axis, é um controle não-standard (precisa do remap).</div>`;
+    html += `<div class="hint">${t('For a real Xbox, expect: mapping = "standard", btn[6]/btn[7] = LT/RT triggers (value from 0 to 1), btn[12..15] = D-Pad, axis[0..3] = sticks. If yours shows an empty mapping and the triggers as axes, it is a non-standard controller (it needs the remap).')}</div>`;
     out.innerHTML = html;
   }
   requestAnimationFrame(render);

@@ -1,14 +1,26 @@
 import { test, expect } from "@playwright/test";
 
-test("carrega UI, popula presets e monitores", async ({ page }) => {
+test("loads the UI, fills presets and monitors", async ({ page }) => {
   await page.goto("/");
   await expect(page.locator("#status")).not.toHaveText("");
   await expect(page.locator("#preset option")).not.toHaveCount(0);
   await expect(page.locator("#connect")).not.toBeDisabled();
 });
 
-test("conecta e o canvas recebe frames reais (WebCodecs)", async ({ page }) => {
-  test.skip(!process.env.DISPLAY, "precisa de X11 para ffmpeg capturar tela");
+test("English by default, pt-BR with ?lang=pt-BR", async ({ page }) => {
+  await page.goto("/?lang=en");
+  await expect(page.locator("#connect")).toHaveText("Connect");
+  await expect(page.locator("html")).toHaveAttribute("lang", "en");
+  await page.goto("/?lang=pt-BR");
+  await expect(page.locator("#connect")).toHaveText("Conectar");
+  await expect(page.locator("#status")).toHaveText("pronto - toque em Conectar");
+  await expect(page.locator("label").first()).toHaveText("preset");
+  await expect(page.locator("#full")).toHaveAttribute("title", "tela cheia");
+  await expect(page.locator("html")).toHaveAttribute("lang", "pt-BR");
+});
+
+test("connects and the canvas receives real frames (WebCodecs)", async ({ page }) => {
+  test.skip(!process.env.DISPLAY, "needs X11 for ffmpeg to capture the screen");
   await page.goto("/");
   await page.click("#connect");
   await expect.poll(
@@ -17,7 +29,7 @@ test("conecta e o canvas recebe frames reais (WebCodecs)", async ({ page }) => {
   ).toBeGreaterThan(0);
 });
 
-test("troca de preset envia comando ao servidor", async ({ page }) => {
+test("changing the preset sends a command to the server", async ({ page }) => {
   await page.goto("/");
   const errors = [];
   page.on("pageerror", (e) => errors.push(e.message));
@@ -31,7 +43,7 @@ test("troca de preset envia comando ao servidor", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
-test("botão de som habilita/desabilita áudio", async ({ page }) => {
+test("the sound button turns audio on/off", async ({ page }) => {
   await page.goto("/");
   const btn = page.locator("#sound");
   await page.waitForTimeout(500);

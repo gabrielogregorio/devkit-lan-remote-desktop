@@ -1,11 +1,11 @@
 <!DOCTYPE html>
-<html lang="pt-br">
+<html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <title>remote-link</title>
+  <title>LAN Remote Desktop</title>
   <link rel="stylesheet" href="/style.css">
 </head>
 <body>
@@ -13,73 +13,74 @@
     <canvas id="screen"></canvas>
     <div id="overlay">
       <div class="card">
-        <h1>remote&#8209;link</h1>
-        <p id="status">conectando…</p>
-        <button id="connect">Conectar</button>
+        <h1>LAN Remote Desktop</h1>
+        <p id="status" data-i18n>connecting…</p>
+        <button id="connect" data-i18n>Connect</button>
       </div>
     </div>
   </div>
 
   <div id="bar">
-    <button id="menuToggle" title="menu">⚙</button>
+    <button id="menuToggle" title="menu" data-i18n-title>⚙</button>
     <span class="group">
-      <label>preset</label>
+      <label data-i18n>preset</label>
       <select id="preset"></select>
     </span>
     <span class="group">
-      <label>resolução</label>
+      <label data-i18n>resolution</label>
       <select id="vres"></select>
     </span>
     <span class="group">
-      <label>fps</label>
+      <label data-i18n>fps</label>
       <select id="vfps"></select>
     </span>
     <span class="group">
-      <label>bitrate</label>
+      <label data-i18n>bitrate</label>
       <select id="vbitrate"></select>
     </span>
     <span class="group">
-      <label>áudio</label>
+      <label data-i18n>audio</label>
       <select id="audioPreset"></select>
     </span>
     <span class="group">
-      <label>monitor</label>
+      <label data-i18n>monitor</label>
       <select id="monitor"></select>
     </span>
-    <button id="sound" title="ligar/desligar áudio">🔇 som</button>
-    <button id="lock" title="capturar mouse (jogos/FPS)">🎯 mouse</button>
-    <button id="kbd" title="teclado virtual">⌨</button>
-    <button id="remapBtn" title="remapear controle (PS2/USB)">🎮</button>
-    <button id="remapClear" title="resetar mapeamento (volta a passar direto)">🎮↺</button>
-    <button id="full" title="tela cheia">⛶</button>
+    <button id="sound" title="toggle audio" data-i18n-title data-i18n>🔇 sound</button>
+    <button id="lock" title="capture mouse (games/FPS)" data-i18n-title>🎯 mouse</button>
+    <button id="kbd" title="virtual keyboard" data-i18n-title>⌨</button>
+    <button id="remapBtn" title="remap controller (PS2/USB)" data-i18n-title>🎮</button>
+    <button id="remapClear" title="reset mapping (back to passthrough)" data-i18n-title>🎮↺</button>
+    <button id="full" title="fullscreen" data-i18n-title>⛶</button>
     <span class="group combos">
-      <label>atalhos</label>
-      <button data-combo="altf4" title="fechar janela ativa">Alt+F4</button>
-      <button data-combo="alttab" title="alternar janelas">Alt+Tab</button>
+      <label data-i18n>shortcuts</label>
+      <button data-combo="altf4" title="close active window" data-i18n-title>Alt+F4</button>
+      <button data-combo="alttab" title="switch windows" data-i18n-title>Alt+Tab</button>
       <button data-combo="ctrlaltdel" title="Ctrl+Alt+Del">C+A+Del</button>
-      <button data-combo="super" title="menu de atividades (Super)">Super</button>
+      <button data-combo="super" title="activities menu (Super)" data-i18n-title>Super</button>
     </span>
     <span id="stats" class="stats">-</span>
   </div>
 
-  <!-- some com a barra: um clique AQUI (só no canto da engrenagem) traz ela de volta -->
-  <div id="menuRecall" title="mostrar menu"></div>
+  <!-- hides with the bar: a click HERE (only the gear corner) brings it back -->
+  <div id="menuRecall" title="show menu" data-i18n-title></div>
 
   <div id="osk" class="hidden"></div>
 
   <div id="remap" class="hidden">
     <div class="card">
-      <h2 id="remapTitle">Remapear controle</h2>
-      <p id="remapPrompt">Acione o controle…</p>
+      <h2 id="remapTitle" data-i18n>Remap controller</h2>
+      <p id="remapPrompt" data-i18n>Press the controller…</p>
       <div class="remap-actions">
-        <button id="remapSkip">Pular</button>
-        <button id="remapCancel">Cancelar</button>
+        <button id="remapSkip" data-i18n>Skip</button>
+        <button id="remapCancel" data-i18n>Cancel</button>
       </div>
-      <p class="remap-hint">Dica: para controles PS2/USB, siga cada passo
-        apertando o botão/direção pedido. O perfil fica salvo no servidor.</p>
+      <p class="remap-hint" data-i18n>Tip: for PS2/USB controllers, follow each step
+        by pressing the requested button/direction. The profile is saved on the server.</p>
     </div>
   </div>
 
+  <script src="/i18n.js"></script>
   <script src="/app.js"></script>
 </body>
 </html>

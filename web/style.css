@@ -36,8 +36,8 @@ body {
 #screen {
   width: 100%;
   height: 100%;
-  /* contain: ocupa todo o cliente preservando o aspecto (escala PRA CIMA também,
-     senão presets baixos ficariam pequenos no centro com bordas pretas). */
+  /* contain: fills the whole client keeping the aspect ratio (scales UP too,
+     otherwise low presets would sit small in the middle with black borders). */
   object-fit: contain;
   image-rendering: auto;
   touch-action: none;
@@ -160,8 +160,8 @@ button:disabled {
   font-size: 16px;
 }
 
-/* hotspot invisível no canto da engrenagem: só existe com a barra escondida.
-   Fica abaixo do OSK (z 25) pra não roubar o clique do Ctrl. */
+/* invisible hotspot in the gear corner: only exists while the bar is hidden.
+   Sits below the OSK (z 25) so it doesn't steal the Ctrl click. */
 #menuRecall {
   position: fixed;
   left: 0;
@@ -180,7 +180,7 @@ button:disabled {
   color: var(--accent);
 }
 
-/* borda que indica que o teclado físico está sendo capturado p/ o PC remoto */
+/* border showing that the physical keyboard is being captured for the remote PC */
 body.kbd-capture #stage {
   box-shadow: inset 0 0 0 2px var(--accent);
 }
@@ -194,7 +194,7 @@ body.kbd-capture #stage {
   font-size: 12px;
 }
 
-/* ---------- teclado virtual ---------- */
+/* ---------- virtual keyboard ---------- */
 #osk {
   position: fixed;
   left: 0;
@@ -264,7 +264,7 @@ body.kbd-capture #stage {
   color: #04121f;
 }
 
-/* ---------- remap de gamepad ---------- */
+/* ---------- gamepad remap ---------- */
 #remap {
   position: fixed;
   inset: 0;
