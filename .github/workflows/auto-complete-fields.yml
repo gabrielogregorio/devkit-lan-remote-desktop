@@ -1,0 +1,99 @@
+name: auto complete fields and validate pr
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, edited]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  validate-version:
+    name: VERSION is new
+    timeout-minutes: 2
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: the tag of VERSION must not exist yet
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error file=VERSION::'$VERSION' is not semver (X.Y.Z or X.Y.Z-rc.1)"
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
+            echo "::error file=VERSION::v$VERSION is already released. Bump VERSION in this PR."
+            exit 1
+          fi
+          echo "this PR releases v$VERSION when merged"
+
+  assign-and-label:
+    name: assign, label and fill the changelog
+    if: github.event.action != 'edited'
+    timeout-minutes: 2
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: read VERSION
+        run: echo "TAG_VERSION=v$(tr -d '[:space:]' < VERSION)" >> "$GITHUB_ENV"
+
+      - name: assign author, add labels, list commits and set the title
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const pull_number = context.issue.number;
+            const pr = context.payload.pull_request;
+
+            if (pr.user.type !== 'Bot') {
+              await github.rest.issues.addAssignees({ owner, repo, issue_number: pull_number, assignees: [pr.user.login] });
+            }
+
+            const commits = await github.paginate(github.rest.pulls.listCommits, { owner, repo, pull_number, per_page: 100 });
+            const messages = commits.map((c) => c.commit.message.split('\n')[0].trim());
+            const files = (await github.paginate(github.rest.pulls.listFiles, { owner, repo, pull_number, per_page: 100 }))
+              .map((f) => f.filename);
+
+            // labels by commit words and by touched files (commits are plain one-liners, no prefixes)
+            const labels = new Set();
+            const byWord = [
+              [/\b(fix|fixes|fixed|bug)\b/i, 'bug'],
+              [/\b(add|adds|added|new|support)\b/i, 'enhancement'],
+              [/\brefactor/i, 'refactor'],
+            ];
+            for (const message of messages) {
+              for (const [re, label] of byWord) if (re.test(message)) labels.add(label);
+            }
+            const byFile = [
+              [(f) => f.endsWith('.md'), 'documentation'],
+              [(f) => f.startsWith('tests/') || f.startsWith('web/__tests__/') || f.startsWith('web/e2e/') || f === 'run-tests.sh', 'tests'],
+              [(f) => f.startsWith('.github/'), 'ci'],
+              [(f) => f === 'web/i18n.js' || f === 'server/i18n.py', 'i18n'],
+              [(f) => f.startsWith('server/'), 'backend'],
+              [(f) => f.startsWith('web/'), 'frontend'],
+              [(f) => f.endsWith('.sh') && !f.startsWith('tests/') && f !== 'run-tests.sh', 'scripts'],
+            ];
+            for (const f of files) {
+              for (const [test, label] of byFile) if (test(f)) labels.add(label);
+            }
+            if (labels.size) {
+              await github.rest.issues.addLabels({ owner, repo, issue_number: pull_number, labels: [...labels] });
+            }
+
+            // commits go into the body where the template has [...autoGenerate]
+            const MARK = '[...autoGenerate]';
+            let body = (await github.rest.pulls.get({ owner, repo, pull_number })).data.body || '';
+            if (body.includes(MARK)) {
+              const fresh = messages.filter((m) => !body.includes(`- ${m}\n`)).map((m) => `- ${m}\n`).join('');
+              if (fresh) body = body.replace(MARK, fresh + MARK);
+            }
+
+            const tag = process.env.TAG_VERSION;
+            const title = /^Release v\S+ - /.test(pr.title)
+              ? pr.title.replace(/^Release v\S+ - /, `Release ${tag} - `)
+              : `Release ${tag} - ${pr.title}`;
+
+            await github.rest.pulls.update({ owner, repo, pull_number, body, title });

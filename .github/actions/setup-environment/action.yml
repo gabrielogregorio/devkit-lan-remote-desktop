@@ -1,0 +1,36 @@
+name: 'Setup Environment'
+description: 'Creates the Python venv from the locked requirements, installs the locked Node packages and, optionally, Playwright and a test TLS certificate for the E2E'
+inputs:
+  e2e:
+    description: 'Also install the locked Playwright + Chromium and a self-signed certificate in certs/'
+    default: 'false'
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+      with:
+        node-version: '22'
+        cache: 'npm'
+
+    - name: Python venv (system python3, locked versions)
+      shell: bash
+      run: |
+        python3 -m venv .venv
+        .venv/bin/pip install --quiet --upgrade pip
+        .venv/bin/pip install --quiet -r requirements-dev.txt
+        .venv/bin/python --version
+        node --version
+
+    - name: Node packages (versions from package-lock.json)
+      shell: bash
+      run: npm ci --silent
+
+    - name: Playwright and a test certificate
+      if: ${{ inputs.e2e == 'true' }}
+      shell: bash
+      run: |
+        npx playwright install --with-deps chromium-headless-shell
+        mkdir -p certs
+        openssl req -x509 -newkey rsa:2048 -nodes -days 2 \
+          -keyout certs/key.pem -out certs/cert.pem -subj "/CN=lan-remote-desktop-ci" \
+          -addext "subjectAltName=IP:127.0.0.1,DNS:localhost" 2> /dev/null

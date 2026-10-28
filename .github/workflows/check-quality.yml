@@ -1,0 +1,47 @@
+name: check lint
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint (ruff + shellcheck + node)
+    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - uses: ./.github/actions/setup-environment
+
+      - name: Ruff (version from uv.lock)
+        run: .venv/bin/ruff check --output-format=github .
+
+      - name: ShellCheck
+        run: shellcheck --severity=warning ./*.sh
+
+      - name: JavaScript syntax
+        run: for f in web/*.js; do node --check "$f"; done
+
+      - name: Scripts are executable in git
+        run: |
+          bad=$(git ls-files -s '*.sh' | awk '$1 != "100755" {print $4}')
+          if [[ -n "$bad" ]]; then
+            for f in $bad; do echo "::error file=$f::not executable in git: git update-index --chmod=+x $f"; done
+            exit 1
+          fi
+
+      - name: Actions are pinned to a commit hash
+        run: |
+          bad=$(grep -rnE '^\s*(- )?uses:\s' .github | grep -vE 'uses:\s+\./' | grep -vE '@[0-9a-f]{40}( |$)' || true)
+          if [[ -n "$bad" ]]; then
+            echo "$bad" | while IFS=: read -r f l _; do echo "::error file=$f,line=$l::pin this action to a full commit hash (# vX.Y.Z as comment)"; done
+            exit 1
+          fi
+
+      - name: Workflow files are valid YAML
+        run: python3 -c "import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/*.yml .github/ISSUE_TEMPLATE/*.yml .github/actions/*/action.yml .github/dependabot.yml
