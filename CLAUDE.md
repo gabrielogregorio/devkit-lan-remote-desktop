@@ -1,256 +1,252 @@
-# CLAUDE.md - remote-link
+# CLAUDE.md - LAN Remote Desktop
 
-Guia operacional para qualquer agente (Claude Code) trabalhar neste repositório.
-Leia antes de editar.
+Operating guide for any agent (Claude Code) working in this repository. Read it before editing.
 
-## O que é
+## What it is
 
-Ferramenta para **compartilhar a tela do PC Ubuntu** (este host) para **qualquer
-device da rede local pelo navegador** (tablet, Android, outro Ubuntu/notebook),
-com **controle de mouse, teclado e gamepad Xbox**. Foco: **FPS alto e o menor
-input-lag possível** na LAN, acessível com um comando: `./remote-link.sh`.
+A tool that **shares the screen of an Ubuntu PC** (this host) with **any device on the local
+network through the browser** (tablet, Android, another Ubuntu/laptop), with **mouse, keyboard and
+Xbox gamepad control**. Focus: **high fps and the lowest possible input lag** on the LAN, started
+with one command: `./run.sh`.
 
-## Arquitetura (a decisão central - não regrida pra VNC/WebRTC sem motivo)
+## Architecture (the central decision - do not regress to VNC/WebRTC without a reason)
 
 ```
-tela X11 ──ffmpeg H.264 HW──> Access Units (AUD) ──WSS /ws/video──> WebCodecs ──> <canvas>
-  (NVENC > VAAPI > x264)                                            (decode HW no device)
+X11 screen ──ffmpeg HW H.264──> Access Units (AUD) ──WSS /ws/video──> WebCodecs ──> <canvas>
+  (NVENC > VAAPI > x264)                                               (HW decode on the device)
 
-som  ──ffmpeg Opus──> 1 pkt Opus/msg ──WSS /ws/audio──> AudioDecoder ──> AudioContext
-  (monitor do sink)                                       (WebCodecs)
+sound ──ffmpeg Opus──> 1 Opus pkt/msg ──WSS /ws/audio──> AudioDecoder ──> AudioContext
+  (sink monitor)                                          (WebCodecs)
 
-device  ──mouse/teclado/gamepad (JSON)──> WSS /ws/input ──> /dev/uinput (evdev) ──> Ubuntu
+device ──mouse/keyboard/gamepad (JSON)──> WSS /ws/input ──> /dev/uinput (evdev) ──> Ubuntu
 ```
 
-Por quê:
-- **WebCodecs** (decode quadro-a-quadro) evita o buffer do MSE/HLS → menor lag
-  num browser, sem instalar nada no cliente.
-- Cada Access Unit H.264 é delimitado por **AUD** (NAL type 9), então o stream é
-  fatiado trivialmente e cada AU vira um `EncodedVideoChunk`.
-- **Encode por hardware** auto-detectado, tunado *ultra-low-latency*
-  (sem B-frames, CBR, GOP ~1s para ressync rápido de novos clientes).
-- **Áudio**: ffmpeg só muxa Opus em Ogg, então `audio.py` tem um **parser Ogg
-  incremental** (`OggOpusParser`) que remonta os pacotes via lacing e descarta
-  os 2 headers (OpusHead/OpusTags) - cada pacote Opus vira um `EncodedAudioChunk`.
-  A fonte usa o token `@DEFAULT_MONITOR@` (segue o sink default sem depender de
-  `pactl`, que não existe em PipeWire puro). Cliente agenda playback com jitter
-  buffer curto (~60 ms).
-- **uinput** dá um **gamepad Xbox 360 virtual** (`045e:028e`) que jogos/Steam
-  reconhecem como real.
+Why:
+- **WebCodecs** (frame-by-frame decode) avoids the MSE/HLS buffer → the lowest lag in a browser,
+  with nothing installed on the client.
+- Every H.264 Access Unit starts with an **AUD** (NAL type 9), so the stream is sliced trivially and
+  each AU becomes one `EncodedVideoChunk`.
+- **Hardware encode**, autodetected, tuned *ultra-low-latency* (no B-frames, CBR, GOP ~1 s for a
+  fast resync of new clients).
+- **Audio:** ffmpeg only muxes Opus into Ogg, so `audio.py` has an **incremental Ogg parser**
+  (`OggOpusParser`) that rebuilds the packets through lacing and drops the 2 headers
+  (OpusHead/OpusTags); each Opus packet becomes one `EncodedAudioChunk`. The source uses the
+  `@DEFAULT_MONITOR@` token (follows the default sink without `pactl`, which does not exist on pure
+  PipeWire). The client schedules playback with a short jitter buffer (~60 ms).
+- **uinput** gives a **virtual Xbox 360 gamepad** (`045e:028e`) that games and Steam see as real.
 
 ## Layout
 
 ```
-remote-link.sh      # único entrypoint: detecta display/IP, venv, cert TLS, sobe o server
+run.sh              # the only entry point: detects display/IP, venv, TLS cert, starts the server
+run-tests.sh        # every test layer, same commands as the CI
 server/
-  main.py           # aiohttp: HTTPS + WSS /ws/video /ws/audio /ws/input; Hub + AudioHub
-  video.py          # detect_encoder(), Presets, get_monitors(), ScreenEncoder (ffmpeg),
-                    #   saneadores do canal 'vq' (clamp_res/clamp_fps/clean_bitrate)
-  inject.py         # Injector: pointer absoluto + teclado + gamepad Xbox360 via uinput
-  keymap.py         # KeyboardEvent.code -> ecodes evdev
-  audio.py          # AudioEncoder (ffmpeg Opus), OggOpusParser, AudioPresets, list_monitors()
-  gamepad.py        # persistência dos perfis de remap (~/.config/remote-link/gamepad-map.json)
-  guardian.py       # escape hatch anti-ban: bloqueia/derruba se achar anticheat/jogo online
+  main.py           # aiohttp: HTTPS + WSS /ws/video /ws/audio /ws/input; Hub + AudioHub; /api/*
+  video.py          # detect_encoder(), presets, get_monitors(), ScreenEncoder (ffmpeg),
+                    #   'vq' sanitizers (clamp_res/clamp_fps/clean_bitrate)
+  inject.py         # Injector: absolute pointer + keyboard + Xbox 360 pad via uinput; NullInjector
+  keymap.py         # KeyboardEvent.code -> evdev ecodes
+  audio.py          # AudioEncoder (ffmpeg Opus), OggOpusParser, audio presets, list_monitors()
+  gamepad.py        # remap profile persistence (~/.config/devkit-lan-remote-desktop/gamepad-map.json)
+  guardian.py       # anti-ban escape hatch: blocks/brings down on anti-cheat or online game
+  i18n.py           # guardian notice strings: English source + PT_BR, tr()
 web/
-  index.html / style.css / app.js   # cliente WebCodecs (sem build, JS puro)
-  gamepad-debug.html                # página de diagnóstico de gamepad (script inline)
-tests/              # pytest (servidor): unit, integração, fuzz, parsers, script, docs
-web/__tests__/      # vitest + jsdom (cliente)
-web/e2e/            # playwright (servidor real + browser real)
-pytest.ini  .coveragerc  vitest.config.js  playwright.config.js  package.json
-requirements.txt    # aiohttp, evdev
-certs/  .venv/  node_modules/   # gerados em runtime - NÃO versionar (estão no .gitignore)
+  index.html / style.css / app.js   # WebCodecs client (no build, plain JS)
+  i18n.js                           # page strings: English source + PT_BR, translator
+  gamepad-debug.html                # gamepad diagnostics page
+tests/              # pytest (server): unit, integration, fuzz, parsers, script, docs, i18n
+web/__tests__/      # vitest + jsdom (client)
+web/e2e/            # playwright (real server + real browser)
+pyproject.toml      # deps, pytest, coverage gate, ruff; uv.lock + requirements*.txt are exports
+vitest.config.js  playwright.config.js  package.json  package-lock.json
+certs/  .venv/  node_modules/   # generated - NEVER commit (they are in .gitignore)
 ```
 
-## Como rodar / testar
+## Host requirements
+
+- **X11** session (Xorg). `run.sh` autodetects `DISPLAY`/`XAUTHORITY` from the environ of
+  `gnome-shell` (or cinnamon/plasmashell/xfwm4/Xorg), falling back to the gdm Xauthority or
+  `~/.Xauthority`.
+- Encoder: NVIDIA with the proprietary driver → `nvenc` (`h264_nvenc -tune ull`); Intel/AMD with
+  VAAPI → `vaapi`; anything else → `x264`.
+- `/dev/uinput` writable by the user (`./run.sh setup`: udev rule + `input` group + ACL).
+- `ffmpeg`, `openssl`, `python3` on the system.
+
+## How to run / test
 
 ```bash
-./remote-link.sh                 # produção (porta 8443)
-./remote-link.sh --port 9000
-./remote-link.sh setup           # libera /dev/uinput (uma vez, com sudo)
+./run.sh                 # production (port 8443)
+./run.sh --port 9000
+./run.sh setup           # grants /dev/uinput (once, with sudo)
 ```
 
-**Antes de commitar, rode as três suítes** (detalhes e mapa do que cada arquivo
-cobre em **`TESTING.md`**):
+**Before committing, run the suites** (details and a map of what each file covers in
+**`TESTING.md`**):
 
 ```bash
-./.venv/bin/python -m pytest --cov=server    # servidor: gate de 100% (.coveragerc)
-npm run test:web                             # cliente (vitest+jsdom): gate no vitest.config.js
-npm run test:e2e                             # ponta a ponta (sobe o server real + Chromium)
+./run-tests.sh             # ruff + shellcheck + pytest (100% gate) + vitest
+RUN_E2E=1 ./run-tests.sh   # + playwright (starts the real server with LRD_INPUT=off + Chromium)
 ```
 
-Checagens de sintaxe (rápidas, mas **não substituem** as suítes):
+Quick syntax checks (they do **not** replace the suites):
 
 ```bash
-python3 -m py_compile server/*.py && node --check web/app.js && bash -n remote-link.sh
+python3 -m py_compile server/*.py && node --check web/app.js && bash -n run.sh
 ```
 
-| variável | efeito |
+| Variable | Effect |
 |---|---|
-| `RL_PRESET` | preset inicial de vídeo: `ultra`/`high`/`medium`/`low`/`potato` |
-| `RL_ENCODER` | força `nvenc`/`vaapi`/`x264` (pula o autodetect) |
-| `RL_RENDER_NODE` | nó DRM do VAAPI (padrão `/dev/dri/renderD128`) |
-| `RL_AUDIO_PRESET` | preset inicial de áudio: `alta`/`media`/`baixa`/`voz` |
-| `RL_AUDIO_SOURCE` | força a fonte de áudio (padrão `@DEFAULT_MONITOR@`) |
-| `RL_PORT` / `RL_HOST` | porta e bind (padrão `8443` / `0.0.0.0`) |
-| `RL_CERT` / `RL_KEY` | caminho do par TLS (o `.sh` gera em `certs/` se faltar) |
-| `RL_DISPLAY` / `RL_XAUTHORITY` | display X (o `.sh` autodetecta pelo `gnome-shell`) |
-| `RL_GAMEPAD_MAP` | arquivo dos perfis de remap (padrão `~/.config/remote-link/`) |
-| `RL_GUARDIAN` | `off` desliga o escape hatch anti-ban - ver `ANTIBAN.md` |
-| `RL_GUARDIAN_INTERVAL` | intervalo (s) da varredura do guardian (padrão `2.0`) |
+| `LRD_PRESET` | starting video preset: `ultra`/`high`/`medium`/`low`/`potato` |
+| `LRD_ENCODER` | forces `nvenc`/`vaapi`/`x264` (skips the autodetect) |
+| `LRD_RENDER_NODE` | VAAPI DRM node (default `/dev/dri/renderD128`) |
+| `LRD_AUDIO_PRESET` | starting audio preset: `high`/`medium`/`low`/`voice` |
+| `LRD_AUDIO_SOURCE` | forces the audio source (default `@DEFAULT_MONITOR@`) |
+| `LRD_PORT` / `LRD_HOST` | port and bind (default `8443` / `0.0.0.0`) |
+| `LRD_CERT` / `LRD_KEY` | TLS pair path (`run.sh` makes it in `certs/` when missing) |
+| `LRD_DISPLAY` / `LRD_XAUTHORITY` | X display (`run.sh` autodetects it from `gnome-shell`) |
+| `LRD_GAMEPAD_MAP` | remap profiles file (default `~/.config/devkit-lan-remote-desktop/`) |
+| `LRD_INPUT` | `off` = no-op injector, never opens `/dev/uinput` (view only; the E2E uses it) |
+| `LRD_GUARDIAN` | `off` turns the anti-ban escape hatch off - see `ANTIBAN.md` |
+| `LRD_GUARDIAN_INTERVAL` | seconds between guardian scans (default `2.0`) |
+| `LRD_LANG` | `en`/`pt-BR` for the guardian notices (default: system language) |
 
-Os testes usam `RL_GUARDIAN=off` e `RL_ENCODER=x264` (`tests/conftest.py`) pra
-não depender do hardware nem do escape hatch.
+The tests use `LRD_GUARDIAN=off` and `LRD_ENCODER=x264` (`tests/conftest.py`) so they depend on
+neither the hardware nor the escape hatch.
 
-### Cuidado ao testar localmente
-- WebCodecs exige **secure context** → o server só serve sentido em **HTTPS**.
-  Sem cert, ele avisa e WebCodecs não roda fora de `localhost`.
-- O encoder **só liga quando há ≥1 espectador** conectado em `/ws/video` (e
-  desliga quando o último sai). Não espere ffmpeg rodando sem cliente.
-- O render WebCodecs no browser precisa de um navegador real para validação
-  visual - `py_compile`/`node --check` só pegam sintaxe.
-- `pytest` e `vitest` rodam sem X11, sem GPU e sem `/dev/uinput` (tudo dublado).
-  Só o `npm run test:e2e` sobe servidor de verdade; o teste que captura tela se
-  auto-pula sem `DISPLAY`.
-- `web/app.js` termina com um **seam de teste**: `module.exports = {...}` quando
-  existe `module` (Node/vitest), senão `boot()`. **Não remova** - é o que
-  permite testar o cliente sem bundler. Função nova que precise de teste entra
-  nessa lista.
+### Careful when testing locally
+- WebCodecs needs a **secure context** → the server only makes sense over **HTTPS**. Without a
+  cert it warns and WebCodecs does not run outside `localhost`.
+- The encoder **only starts with ≥1 viewer** on `/ws/video` (and stops when the last one leaves).
+  Do not expect ffmpeg running without a client.
+- The WebCodecs render needs a real browser for visual validation; `py_compile`/`node --check` only
+  catch syntax.
+- `pytest` and `vitest` run without X11, GPU and `/dev/uinput` (everything is faked). Only the E2E
+  starts a real server, with `LRD_INPUT=off`; the screen capture test skips itself without
+  `DISPLAY`. Never run the E2E server with a real injector: garbage on the input channel would move the
+  mouse.
+- `web/app.js` ends with a **test seam**: `module.exports = {...}` when `module` exists
+  (Node/vitest), else `boot()`. **Do not remove it** - it is what allows testing the client without
+  a bundler. A new function that needs a test goes into that list.
 
-## Endpoints HTTP
+## HTTP endpoints
 
-- `GET /api/monitors` - config atual: encoder, monitores, presets, `video`
-  (res/fps/bitrate atuais), faixas (`res_options`/`fps_options`/`bitrate_options`),
-  presets de áudio e `audio_manual`.
-- `GET /api/gamepad-map` - todos os perfis de remapeamento salvos (por
-  `gamepad.id`). `POST` com `{"id","map"}` salva; `DELETE` com `{"id"}` apaga.
-  Persistido por `server/gamepad.py` em
-  `~/.config/remote-link/gamepad-map.json` (ou `RL_GAMEPAD_MAP`). O servidor só
-  guarda/serve o JSON (blob opaco).
-- `GET /gamepad-debug.html` - página de diagnóstico: mostra `mapping`, todos os
-  `buttons[i].value` e `axes[i]` ao vivo. Use pra descobrir como um controle
-  aparece antes de mexer em mapeamento.
+- `GET /api/monitors` - current config: encoder, monitors, presets, `video` (current
+  res/fps/bitrate), ranges (`res_options`/`fps_options`/`bitrate_options`), audio presets and
+  `audio_manual`.
+- `GET /api/gamepad-map` - every saved remap profile (by `gamepad.id`). `POST` with `{"id","map"}`
+  saves; `DELETE` with `{"id"}` deletes. Persisted by `server/gamepad.py` in
+  `~/.config/devkit-lan-remote-desktop/gamepad-map.json` (or `LRD_GAMEPAD_MAP`). The server only
+  stores/serves the JSON (opaque blob).
+- `GET /gamepad-debug.html` - diagnostics page: shows `mapping`, every `buttons[i].value` and
+  `axes[i]` live. Use it to find out how a controller shows up before touching a mapping.
 
-Gamepad - **passagem direta por padrão**: se `gamepad.mapping === "standard"`
-(Xbox e a maioria), o cliente repassa byte a byte na ordem W3C (que já é a ordem
-que o servidor quer) e **ignora qualquer perfil** - um Xbox nunca precisa de
-remap. O remap (`🎮`) só vale e só roda em controle **não-standard** (clones
-PS2/USB); `🎮↺` apaga o perfil e volta à passagem direta. Gatilhos LT/RT são
-replicados fiéis (`clamp01` no cliente, `round(v*255)` no servidor) - sem
-deadzone/rescale.
+Gamepad - **pass-through by default**: if `gamepad.mapping === "standard"` (Xbox and most), the
+client forwards it byte by byte in W3C order (already the order the server wants) and **ignores any
+profile** - an Xbox never needs a remap. The remap (`🎮`) only applies to and only runs on a
+**non-standard** controller (PS2/USB clones); `🎮↺` deletes the profile and goes back to
+pass-through. LT/RT triggers are replicated exactly (`clamp01` on the client, `round(v*255)` on the
+server) - no deadzone/rescale.
 
-O `pollPads()` só reenvia quando o estado muda **na resolução do destino**
-(eixo → int16, botão/gatilho → byte 0..255): o valor que vai no fio continua
-sendo o cru, mas comparar float faria o micro-ruído do controle gerar
-mensagem 60×/s à toa.
+`pollPads()` only resends when the state changes **at the destination resolution** (axis → int16,
+button/trigger → byte 0..255): the value on the wire is still the raw one, but comparing floats
+would make the controller's micro-noise send a message 60×/s for nothing.
 
-## Protocolo dos WebSockets
+## WebSocket protocol
 
-`/ws/video` (binário): servidor → cliente, cada mensagem = 1 Access Unit H.264
-Annex-B. Mensagens **texto** = controle, ex.: `{"t":"reset"}` (cliente deve
-recriar o `VideoDecoder` e esperar o próximo keyframe).
+`/ws/video` (binary): server → client, each message = 1 H.264 Annex-B Access Unit. **Text**
+messages = control, e.g. `{"t":"reset"}` (the client must recreate the `VideoDecoder` and wait for
+the next keyframe).
 
-`/ws/audio` (binário): servidor → cliente, cada mensagem = 1 pacote Opus
-(48 kHz, estéreo, frame de 20 ms). Cliente decoda com `AudioDecoder` e agenda
-no `AudioContext`. Liga só com ≥1 ouvinte conectado.
+`/ws/audio` (binary): server → client, each message = 1 Opus packet (48 kHz, stereo, 20 ms frame).
+The client decodes with `AudioDecoder` and schedules it on the `AudioContext`. Only on with ≥1
+listener.
 
-`/ws/input` (texto JSON): cliente → servidor.
-- `{"t":"m","x":0..1,"y":0..1}` mover mouse (absoluto, normalizado na região)
-- `{"t":"mr","dx","dy"}` mover relativo (pointer-lock)
-- `{"t":"md","b":N}` / `{"t":"mu","b":N}` botão do mouse down/up
+`/ws/input` (JSON text): client → server.
+- `{"t":"m","x":0..1,"y":0..1}` move the mouse (absolute, normalized inside the region)
+- `{"t":"mr","dx","dy"}` relative move (pointer lock)
+- `{"t":"md","b":N}` / `{"t":"mu","b":N}` mouse button down/up
 - `{"t":"w","x","y"}` scroll
-- `{"t":"k","code":"KeyA","down":true}` tecla
-- `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...],"lt":0..1,"rt":0..1}`
-  gamepad. `lt`/`rt` são os gatilhos enviados explícitos (o cliente detecta
-  mesmo em mapping não-standard, ex.: controle PS2/USB onde vêm como eixos); o
-  servidor cai pros `b[6]/b[7]` só se ausentes.
-- `{"t":"q","preset":"high"}` atalho de preset: aplica resolução+fps+bitrate de
-  uma vez. O áudio acompanha (`main.AUDIO_FOR_QUALITY`) **só** se o usuário ainda
-  não tiver mexido no áudio na mão (`AudioHub.manual`). Reinicia os encoders.
-- `{"t":"vq","res":720,"fps":60,"bitrate":"7M"}` qualidade de **vídeo
-  independente** (qualquer subconjunto dos 3 campos); vira preset "custom".
-- `{"t":"aq","preset":"media"}` qualidade de **áudio independente** (marca
-  `AudioHub.manual=True` → desliga o arrasto do `q`).
-- `{"t":"mon","i":0}` trocar monitor (`i:null` = primário)
+- `{"t":"k","code":"KeyA","down":true}` key
+- `{"t":"g","a":[lx,ly,rx,ry],"b":[{"p":bool,"v":float},...],"lt":0..1,"rt":0..1}` gamepad.
+  `lt`/`rt` are the triggers sent explicitly (the client detects them even on a non-standard
+  mapping, e.g. a PS2/USB controller where they come as axes); the server falls back to
+  `b[6]/b[7]` only when they are missing.
+- `{"t":"q","preset":"high"}` preset shortcut: applies resolution+fps+bitrate at once. The audio
+  follows (`main.AUDIO_FOR_QUALITY`) **only** if the user has not touched the audio by hand
+  (`AudioHub.manual`). Restarts the encoders.
+- `{"t":"vq","res":720,"fps":60,"bitrate":"7M"}` **independent video** quality (any subset of the
+  3 fields); becomes the "custom" preset.
+- `{"t":"aq","preset":"medium"}` **independent audio** quality (sets `AudioHub.manual=True` → turns
+  off the `q` drag).
+- `{"t":"mon","i":0}` switch monitor (`i:null` = primary)
 
-### Robustez do canal de input (regra, não detalhe)
+### Input channel robustness (a rule, not a detail)
 
-O `/ws/input` é **LAN aberta**: qualquer coisa pode chegar nele, e uma exceção
-que escape do handler **derruba o WebSocket inteiro** - o usuário perde mouse e
-teclado até o cliente reconectar. Por isso:
+`/ws/input` is an **open LAN**: anything can arrive on it, and an exception escaping the handler
+**drops the whole WebSocket** - the user loses mouse and keyboard until the client reconnects.
+Therefore:
 
-- payload que não é objeto JSON (`[]`, `5`, `null`, `"txt"`) é **ignorado**;
-- `preset` não-string é ignorado (`x in DICT` com lista/dict levanta
-  `TypeError: unhashable`);
-- `vq` passa por `video.clamp_res` / `clamp_fps` / `clean_bitrate`: fora da
-  faixa é **clampado**, lixo **mantém o valor atual**. Faixas: altura
-  144–2160, fps 5–240, bitrate 100 kbps–100 Mbps no formato do ffmpeg
-  (`12M`/`3500k`/`800000`);
-- `mon` com índice não-inteiro é ignorado;
-- o resto vai pro `injector.handle()` dentro de `try/except` (mouse/teclado
-  falham limpo antes de escrever qualquer coisa);
-- `gamepad_state()` é **total**: tipo errado/NaN/campo faltando vira neutro
-  (solto/centro) e o frame **sempre** termina em `syn()` - meio-frame escrito
-  é o que gera botão preso e gatilho fantasma;
-- `/api/gamepad-map` responde **400** (não 500) pra JSON que não seja objeto.
+- a payload that is not a JSON object (`[]`, `5`, `null`, `"txt"`) is **ignored**;
+- a non-string `preset` is ignored (`x in DICT` with a list/dict raises `TypeError: unhashable`);
+- `vq` goes through `video.clamp_res` / `clamp_fps` / `clean_bitrate`: out of range is **clamped**,
+  garbage **keeps the current value**. Ranges: height 144-2160, fps 5-240, bitrate 100 kbps-100 Mbps
+  in ffmpeg format (`12M`/`3500k`/`800000`);
+- `mon` with a non-integer index is ignored;
+- the rest goes to `injector.handle()` inside `try/except` (mouse/keyboard fail clean before writing
+  anything);
+- `gamepad_state()` is **total**: wrong type/NaN/missing field becomes neutral (released/centered)
+  and the frame **always** ends in `syn()` - a half-written frame is what makes stuck buttons and
+  ghost triggers;
+- `/api/gamepad-map` answers **400** (not 500) for JSON that is not an object.
 
-Cliente (`web/app.js`) faz o simétrico: `padNum`/`clamp01` garantem que nunca
-sai NaN/Infinity no JSON, e `pollPads()` roda dentro de `try/catch` - se a
-exceção escapar, o `requestAnimationFrame` do fim não roda e **o gamepad morre
-pelo resto da sessão**. Ao mexer nesses caminhos, rode
-`tests/test_fuzz_input.py` e `web/__tests__/protocol.test.js`.
+The client (`web/app.js`) does the mirror: `padNum`/`clamp01` make sure no NaN/Infinity ever goes
+out in the JSON, and `pollPads()` runs inside `try/catch` - if the exception escaped, the
+`requestAnimationFrame` at the end would not run and **the gamepad would die for the rest of the
+session**. When touching these paths, run `tests/test_fuzz_input.py` and
+`web/__tests__/protocol.test.js`.
 
-Encoder H.264 tunado p/ baixa latência: GOP ~1s (ressync rápido p/ cliente novo
-sem tela preta longa; na LAN banda sobra), VBV pequeno (`_lowlat_bufsize` ~1/3
-do bitrate/s), spatial-AQ no NVENC (nitidez no mesmo bitrate), profile `high`,
-`no-scenecut`+`forced-idr`. O encode (NVENC) sustenta 1080p60 a 1x; o
-gargalo prático costuma ser o **decode no browser**, por isso a régua útil é
-descer resolução/bitrate (controles separados).
+H.264 encoder tuned for low latency: GOP ~1 s (fast resync for a new client without a long black
+screen; on the LAN bandwidth is plenty), small VBV (`_lowlat_bufsize` ~1/3 of the bitrate/s),
+spatial-AQ on NVENC (sharpness at the same bitrate), `high` profile, `no-scenecut`+`forced-idr`. An
+NVENC encode holds 1080p60 at 1x; the practical bottleneck is usually the **decode in the browser**,
+so the useful lever is lowering resolution/bitrate (separate controls).
 
-O cliente (`web/app.js`) **descarta delta frames até o 1º keyframe** após
-`configure()`/reset (`needKey`): o `VideoDecoder` exige keyframe como 1º chunk,
-senão dá erro "key frame is required" no Firefox e no Chrome.
+The client (`web/app.js`) **drops delta frames until the 1st keyframe** after
+`configure()`/reset (`needKey`): `VideoDecoder` requires a keyframe as the 1st chunk, otherwise
+Firefox and Chrome fail with "key frame is required".
 
-## Convenções
+## i18n
 
-- Comentários e mensagens ao usuário em **português** (o resto do projeto está
-  assim). Código/identificadores em inglês quando natural.
-- Cliente web é **JS puro, sem build/bundler** - mantenha assim.
-- Latência acima de features. Antes de adicionar buffering/qualidade, pense no lag.
-- Nunca versione `certs/` (chave privada) nem `.venv/`.
-- **Todo campo novo do protocolo nasce com saneamento e teste**: um valor
-  inesperado não pode derrubar conexão nem encoder (ver "Robustez" acima).
-- **Doc junto com o código.** `tests/test_docs_sync.py` falha se um endpoint,
-  um tipo de mensagem, um preset ou uma `RL_*` existir no código e não aparecer
-  aqui/no README. Se o teste reclamar, a doc é que está errada.
-- Cobertura do servidor tem gate de **100%** (`.coveragerc`); o cliente tem
-  limiares no `vitest.config.js`. Código novo vem com teste no mesmo commit.
+- Code, comments, logs, docs and commits in **English**.
+- The page shows English or Brazilian Portuguese: `?lang=` wins, else the browser's first language
+  (`pt*` → pt-BR). English text is the key; the pt-BR line lives in `PT_BR` in `web/i18n.js`. Use
+  `t("…")` in `app.js` (with `{placeholders}`) or `data-i18n` attributes in the HTML.
+- The guardian notices (terminal banner and dialog) go through `tr("…")` with `PT_BR` in
+  `server/i18n.py`; language from `LRD_LANG`, then `LANGUAGE`/`LC_ALL`/`LC_MESSAGES`/`LANG`.
+- `tests/test_i18n.py` and `web/__tests__/i18n.test.js` fail on a missing line, on different
+  placeholders or on a line no longer used.
 
-## Próximos passos possíveis (ainda não feitos)
+## Conventions
 
-- Seleção de **app de áudio** específico na UI (hoje captura o mix do sink).
-- Modo "desktop inteiro" (todos os monitores num único stream).
-- Captura **Wayland** via PipeWire portal (hoje só X11/`x11grab`).
-- Bitrate adaptativo por RTT/perda (vídeo e áudio).
-- Autenticação (PIN/token) - hoje é LAN aberta atrás do TLS self-signed.
+- The web client is **plain JS, no build/bundler** - keep it that way.
+- Latency over features. Before adding buffering/quality, think about the lag.
+- Never commit `certs/` (private key) or `.venv/`.
+- **Every new protocol field is born with sanitizing and a test**: an unexpected value cannot drop a
+  connection or the encoder (see "Robustness" above).
+- **Docs together with the code.** `tests/test_docs_sync.py` fails if an endpoint, a message type, a
+  preset or an `LRD_*` variable exists in the code and does not show up here/in the README. If the
+  test complains, the docs are what is wrong.
+- Server coverage has a **100%** gate (`pyproject.toml`); the client has thresholds in
+  `vitest.config.js`. New code comes with a test in the same commit.
+- Dependencies: change `pyproject.toml`, then `uv lock` and export both `requirements*.txt`
+  (commands in the README). Node packages at exact versions in `package.json`.
+- Commits: one line, English, imperative.
 
-## Feito
-- **Suíte de testes em 4 camadas** (`TESTING.md`): unit (pytest/vitest),
-  integração real de WebSocket (`tests/test_integration_ws.py`), fuzz e
-  propriedade (`test_fuzz_input.py`, `test_parsers_property.py`,
-  `web/__tests__/protocol.test.js`), entrypoint em sandbox
-  (`tests/test_script.py`), e2e no browser (`web/e2e/`). Gate de 100% no
-  servidor; guarda anti-drift da doc em `tests/test_docs_sync.py`.
-- **Endurecimento contra entrada hostil**: `/ws/input` e `/api/gamepad-map`
-  ignoram/recusam payload torto em vez de derrubar a conexão; `vq` é clampado;
-  `gamepad_state()` virou total; no cliente, `pollPads()` não morre mais se o
-  controle entregar valor inválido (ver "Robustez do canal de input").
-- **Áudio**: canal Opus via `/ws/audio` com qualidade ajustável em runtime
-  (presets `alta`/`media`/`baixa`/`voz`). Ver `server/audio.py`.
-- **Escape hatch anti-banimento** (`server/guardian.py`): roda **antes** de
-  carregar qualquer lib de controle/tela. Não inicia (e derruba em runtime) se
-  detectar anticheat (Vanguard, EAC, BattlEye, GameGuard…) ou jogo online da
-  lista - em Windows (`tasklist`) e Linux (`/proc`, inclui Proton/Wine). Mostra
-  aviso na tela (diálogo + terminal) dizendo o quê e por quê. Desliga com
-  `RL_GUARDIAN=off` (não recomendado). Detalhes e lista completa em
-  **`ANTIBAN.md`** / `python -m server.guardian --list`. Variável: `RL_GUARDIAN`.
+## Possible next steps (not done yet)
+
+- Picking a specific **audio app** in the UI (today it captures the sink mix).
+- A "whole desktop" mode (every monitor in one stream).
+- **Wayland** capture through the PipeWire portal (today X11/`x11grab` only).
+- Adaptive bitrate by RTT/loss (video and audio).
+- Authentication (PIN/token + QR code) - today it is an open LAN behind the self-signed TLS.
+- Measuring the real glass-to-glass latency (the bar shows the interval between frames).

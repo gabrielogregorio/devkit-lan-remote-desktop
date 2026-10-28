@@ -1,101 +1,110 @@
-# Testes - remote-link
+# Tests - LAN Remote Desktop
 
-Como o projeto é testado, o que cada camada garante e onde encaixar teste novo.
-Guia de arquitetura: [CLAUDE.md](CLAUDE.md).
+How the project is tested, what each layer guarantees and where a new test fits. Architecture
+guide: [CLAUDE.md](CLAUDE.md).
 
-## Rodar tudo
+## Run everything
 
 ```bash
-./.venv/bin/python -m pytest --cov=server    # servidor  (gate: 100%)
-npm run test:web                             # cliente   (vitest + jsdom)
-npm run test:e2e                             # ponta a ponta (server real + Chromium)
+./run-tests.sh             # ruff + ShellCheck + server (100% gate) + web client
+RUN_E2E=1 ./run-tests.sh   # + end to end (real server + Chromium)
 ```
 
-Nada disso precisa de X11, GPU, `/dev/uinput` ou rede - exceto o `test:e2e`,
-que sobe o `server.main` de verdade (o teste que captura tela se auto-pula sem
-`DISPLAY`). Os testes forçam `RL_GUARDIAN=off` e `RL_ENCODER=x264`
-(`tests/conftest.py`) pra não depender do hardware desta máquina.
+Or layer by layer:
 
-Gates: `.coveragerc` exige **100%** de linha+branch em `server/`;
-`vitest.config.js` exige 95% de linhas/funções/statements e 90% de branches em
-`web/app.js`. Código novo entra com teste no mesmo commit.
+```bash
+.venv/bin/python -m pytest --cov=server    # server  (gate: 100%)
+npm run test:web                           # client  (vitest + jsdom)
+npm run test:e2e                           # end to end (real server + Chromium)
+```
 
-## As camadas (e por que cada uma existe)
+None of it needs X11, a GPU, `/dev/uinput` or the network, except `test:e2e`, which starts the real
+`server.main` with `LRD_GUARDIAN=off LRD_INPUT=off` (so no test opens `/dev/uinput` or moves the
+mouse) and needs `certs/cert.pem` (`./run.sh` makes it; the CI makes a throwaway one). The test that
+captures the screen skips itself without `DISPLAY`. The unit tests force `LRD_GUARDIAN=off` and
+`LRD_ENCODER=x264` (`tests/conftest.py`) so they do not depend on this machine's hardware.
 
-| camada | onde | responde a pergunta |
+Gates: `pyproject.toml` (`[tool.coverage]`) requires **100%** line + branch coverage on `server/`;
+`vitest.config.js` requires 95% of lines/functions/statements and 90% of branches on the client.
+New code comes with its test in the same commit.
+
+## The layers (and why each one exists)
+
+| Layer | Where | Answers |
 |---|---|---|
-| unit | `tests/test_*.py`, `web/__tests__/app.test.js` | esta função faz o que promete? |
-| integração | `tests/test_integration_ws.py` | as peças conversam pelo WebSocket de verdade? |
-| propriedade/fuzz | `tests/test_fuzz_input.py`, `test_parsers_property.py`, `web/__tests__/protocol.test.js` | vale pra *qualquer* entrada, não só pro exemplo? |
-| entrypoint | `tests/test_script.py` | o `./remote-link.sh` faz a coisa certa? |
-| e2e | `web/e2e/*.spec.js` | funciona num browser real contra o servidor real? |
-| anti-drift | `tests/test_docs_sync.py` | a documentação ainda descreve este código? |
+| unit | `tests/test_*.py`, `web/__tests__/app.test.js` | does this function do what it promises? |
+| integration | `tests/test_integration_ws.py` | do the parts talk over a real WebSocket? |
+| property/fuzz | `tests/test_fuzz_input.py`, `tests/test_parsers_property.py`, `web/__tests__/protocol.test.js` | does it hold for *any* input, not only the example? |
+| entry point | `tests/test_script.py` | does `./run.sh` do the right thing? |
+| e2e | `web/e2e/*.spec.js` | does it work in a real browser against the real server? |
+| i18n | `tests/test_i18n.py`, `web/__tests__/i18n.test.js` | does every user-facing string have its pt-BR line? |
+| anti-drift | `tests/test_docs_sync.py` | do the docs still describe this code? |
 
-### Servidor (`tests/`)
+### Server (`tests/`)
 
-- **`test_main.py`** - `Hub`/`AudioHub`, filas, ciclo dos encoders, rotas.
-- **`test_video.py`** - detecção de encoder, presets, `xrandr`, montagem do
-  comando ffmpeg, fatiamento de AU, supervisão/retry.
-- **`test_audio.py`** - presets Opus, `OggOpusParser`, fontes de áudio.
-- **`test_inject.py`** - escrita evdev de mouse/teclado/gamepad.
-- **`test_keymap.py`** - o mapa `KeyboardEvent.code` → código evdev.
-- **`test_gamepad.py`** - persistência dos perfis de remap.
-- **`test_guardian.py`** - escape hatch anti-ban (Linux e Windows).
-- **`test_integration_ws.py`** - sobe o app aiohttp e fala pelos WS como o
-  cliente fala: keyframe-gating, fan-out, `reset` na troca de preset, áudio
-  arrastado (ou não) pelo preset de vídeo, troca de monitor, e a bateria de
-  payloads tortos que **não** podem derrubar o canal de input.
-- **`test_fuzz_input.py`** - fuzz determinístico do `Injector` e dos saneadores
-  de qualidade. Invariante: o que chega no `/dev/uinput` fica **sempre** dentro
-  da faixa declarada no device, e todo frame de gamepad fecha em `syn()`.
-- **`test_parsers_property.py`** - os dois parsers incrementais (Ogg/Opus e
-  Access Units H.264). Propriedade central: **o resultado não depende de como o
-  stream foi picotado** - o mesmo stream é repartido de dezenas de formas
-  aleatórias e a saída tem que ser idêntica.
-- **`test_script.py`** - roda o `remote-link.sh` de verdade num sandbox (cópia
-  em `tmp`, PATH só com dublês de `ffmpeg`/`openssl`/`python3`/`sudo`…). Cobre
-  porta, TLS, guardian bloqueando, uinput sem permissão, modo `setup`.
+- **`test_main.py`** - `Hub`/`AudioHub`, queues, encoder lifecycle, routes.
+- **`test_video.py`** - encoder detection, presets, `xrandr`, the ffmpeg command, AU slicing,
+  supervision and retry.
+- **`test_audio.py`** - Opus presets, `OggOpusParser`, audio sources.
+- **`test_inject.py`** - evdev writes for mouse, keyboard and gamepad; the no-op injector.
+- **`test_keymap.py`** - the `KeyboardEvent.code` → evdev code map.
+- **`test_gamepad.py`** - remap profile persistence.
+- **`test_guardian.py`** - anti-ban escape hatch (Linux and Windows).
+- **`test_i18n.py`** - every `tr("…")` in `server/` has a pt-BR line with the same placeholders.
+- **`test_integration_ws.py`** - starts the aiohttp app and talks over the WebSockets the way the
+  client does: keyframe gating, fan-out, `reset` on preset change, audio following (or not) the
+  video preset, monitor switch, and the battery of malformed payloads that **must not** drop the
+  input channel.
+- **`test_fuzz_input.py`** - deterministic fuzz of the `Injector` and of the quality sanitizers.
+  Invariant: what reaches `/dev/uinput` is **always** inside the range declared on the device, and
+  every gamepad frame ends in `syn()`.
+- **`test_parsers_property.py`** - the two incremental parsers (Ogg/Opus and H.264 Access Units).
+  Core property: **the result does not depend on how the stream was split** - the same stream is
+  cut in dozens of random ways and the output must be identical.
+- **`test_script.py`** - runs `run.sh` for real in a sandbox (a copy in `tmp`, `PATH` with only
+  fakes of `ffmpeg`/`openssl`/`python3`/`sudo`…). Covers the port, TLS, the guardian blocking,
+  uinput without permission, `setup` mode.
 
-### Cliente (`web/__tests__/`)
+### Client (`web/__tests__/`)
 
-- **`app.test.js`** - por exemplo: decoder, áudio, mouse/touch/teclado, OSK,
-  remap, UI, stats, boot.
-- **`protocol.test.js`** - contrato e propriedade: todo comando enviado é um
-  `t` que o servidor conhece, nenhum campo vira `null`/`NaN` no JSON, e
-  `mapPad`/`readSource` produzem frame válido pra **qualquer** controle
-  (incluindo perfil corrompido e pad sem arrays). É o espelho do
+- **`app.test.js`** - by example: decoder, audio, mouse/touch/keyboard, on-screen keyboard, remap,
+  UI, stats, boot.
+- **`protocol.test.js`** - contract and property: every command sent is a `t` the server knows, no
+  field becomes `null`/`NaN` in the JSON, and `mapPad`/`readSource` produce a valid frame for
+  **any** controller (including a corrupt profile and a pad without arrays). It mirrors
   `test_fuzz_input.py`.
-- **`gamepad-debug.test.js`** - a página de diagnóstico: renderização e o
-  histórico de min/max e oscilação (o detector de gatilho bugado).
+- **`gamepad-debug.test.js`** - the diagnostics page: rendering and the min/max and oscillation
+  history (the broken trigger detector).
+- **`i18n.test.js`** - every `t("…")` and `data-i18n` text has a pt-BR line with the same
+  placeholders, no unused line, language detection.
 
 ### E2E (`web/e2e/`)
 
-- **`smoke.spec.js`** - a UI carrega, conecta, o canvas recebe frame real,
-  preset e som funcionam.
-- **`api.spec.js`** - contrato HTTP contra o servidor real: formato de
-  `/api/monitors`, ciclo completo do perfil de gamepad, 400 pra corpo inválido,
-  página de debug, e lixo no `/ws/input` sem derrubar o canal.
+- **`smoke.spec.js`** - the UI loads, connects, the canvas gets a real frame, preset and sound work,
+  the page in pt-BR.
+- **`api.spec.js`** - HTTP contract against the real server: `/api/monitors` shape, the full gamepad
+  profile cycle, 400 for an invalid body, the debug page, and garbage on `/ws/input` without
+  dropping the channel.
 
-## Escrevendo teste novo
+## Writing a new test
 
-**Ache a camada certa.** Lógica pura → unit. "As peças conversam?" → integração.
-"Vale pra qualquer entrada?" → propriedade. Só no browser → e2e.
+**Find the right layer.** Pure logic → unit. "Do the parts talk?" → integration. "Does it hold for
+any input?" → property. Only in the browser → e2e.
 
-**Fuzz é determinístico.** Sementes fixas (`SEEDS = [...]`), nada de
-`random.random()` sem semente nem `Date.now()`. Falhou uma vez, falha sempre -
-senão o teste vira ruído e alguém desativa.
+**Fuzz is deterministic.** Fixed seeds (`SEEDS = [...]`), no unseeded `random.random()` and no
+`Date.now()`. If it failed once, it fails every time; otherwise the test becomes noise and someone
+turns it off.
 
-**Dublê só na borda.** Fake em `/dev/uinput`, `ffmpeg`, `xrandr`, `/proc` e
-subprocess - o resto roda de verdade. Os fakes moram em `tests/helpers.py`
-(Python) e `web/__tests__/setup.js` (JS); reaproveite antes de criar outro.
+**Fakes only at the edge.** Fake `/dev/uinput`, `ffmpeg`, `xrandr`, `/proc` and subprocess; the rest
+runs for real. The fakes live in `tests/helpers.py` (Python) and `web/__tests__/setup.js` (JS);
+reuse them before making another.
 
-**Teste de robustez afirma sobrevivência, não formato.** O importante não é
-"que erro deu" e sim que a conexão continua viva, o encoder continua rodando e
-nada foi escrito fora da faixa.
+**A robustness test asserts survival, not shape.** What matters is not "which error came back" but
+that the connection stays alive, the encoder keeps running and nothing was written out of range.
 
-**Função nova no cliente** que precise de teste tem que entrar no
-`module.exports` do fim do `web/app.js` (o seam que permite testar sem bundler).
+**A new client function** that needs a test must go into the `module.exports` at the end of
+`web/app.js` (the seam that allows testing without a bundler).
 
-**Mexeu no protocolo, no `/api/*`, num preset ou numa `RL_*`?** Atualize
-`CLAUDE.md`/`README.md` junto - o `tests/test_docs_sync.py` compara o que o
-código expõe com o que a doc descreve e falha se divergir.
+**Changed the protocol, an `/api/*` route, a preset or an `LRD_*` variable?** Update
+`CLAUDE.md`/`README.md` with it: `tests/test_docs_sync.py` compares what the code exposes with what
+the docs describe and fails if they drift.
