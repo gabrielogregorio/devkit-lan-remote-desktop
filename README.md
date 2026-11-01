@@ -29,10 +29,6 @@
 
 <sub>Recorded with the real capture, H.264 encoder, WebSocket and WebCodecs client on a simulated desktop in a private Xvfb, with input drawn on it instead of <code>/dev/uinput</code>.</sub>
 
-<br><br>
-
-<img src="docs/remote-desktop-in-browser.png" alt="The Ubuntu desktop streamed into a Chrome tab at https://192.168.0.106:8443, with the bottom bar: preset high, resolution 900p, 60 fps, bitrate 12M, audio medium, monitor HDMI-0, sound, mouse, keyboard, gamepad remap, full screen and the Alt+F4, Alt+Tab, Ctrl+Alt+Del and Super shortcuts; the stats read 60 fps, 12.0 Mbps, about 17 ms" width="820">
-
 </div>
 
 ## About
