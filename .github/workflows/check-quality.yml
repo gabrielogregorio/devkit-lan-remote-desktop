@@ -45,3 +45,20 @@ jobs:
 
       - name: Workflow files are valid YAML
         run: python3 -c "import sys, yaml; [yaml.safe_load(open(f)) for f in sys.argv[1:]]" .github/workflows/*.yml .github/ISSUE_TEMPLATE/*.yml .github/actions/*/action.yml .github/dependabot.yml
+
+  audit:
+    name: Audit dependencies (pip-audit + npm audit)
+    if: github.event_name == 'pull_request'
+    timeout-minutes: 5
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+
+      - name: Python packages (versions from requirements-dev.txt)
+        run: pipx run pip-audit==2.10.1 --no-deps --disable-pip -r requirements-dev.txt
+
+      - name: Node packages used in production (no known vulnerability)
+        run: npm audit --omit=dev
+
+      - name: Node tools (no high or critical vulnerability)
+        run: npm audit --audit-level=high
