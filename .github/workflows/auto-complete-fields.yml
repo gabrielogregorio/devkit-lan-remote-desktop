@@ -17,12 +17,18 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-      - name: the tag of VERSION must not exist yet
+      - name: VERSION is semver and, on a release branch, its tag must not exist yet
+        env:
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           VERSION=$(tr -d '[:space:]' < VERSION)
           if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
             echo "::error file=VERSION::'$VERSION' is not semver (X.Y.Z or X.Y.Z-rc.1)"
             exit 1
+          fi
+          if ! [[ "$HEAD_REF" =~ ^release/[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "$HEAD_REF is not a release/x.x.x branch: the tag is not checked"
+            exit 0
           fi
           if git ls-remote --exit-code --tags origin "refs/tags/v$VERSION" > /dev/null; then
             echo "::error file=VERSION::v$VERSION is already released. Bump VERSION in this PR."

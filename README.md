@@ -25,7 +25,9 @@
 
 <br>
 
-<img src="docs/remote-desktop-in-browser.png" alt="The Ubuntu desktop streamed into a Chrome tab at https://192.168.0.106:8443, with the bottom bar: preset high, resolution 900p, 60 fps, bitrate 12M, audio medium, monitor HDMI-0, sound, mouse, keyboard, gamepad remap, full screen and the Alt+F4, Alt+Tab, Ctrl+Alt+Del and Super shortcuts; the stats read 60 fps, 12.0 Mbps, about 17 ms" width="820">
+<img src="docs/demo.gif" alt="Animated demo: the page connects and shows a desktop streamed live, the mouse drags a window, a click and the keyboard type in a text editor, and the preset switches between low and high while the stream keeps running" width="820">
+
+<sub>Recorded with the real capture, H.264 encoder, WebSocket and WebCodecs client on a simulated desktop in a private Xvfb, with input drawn on it instead of <code>/dev/uinput</code>.</sub>
 
 </div>
 
@@ -169,7 +171,7 @@ GitHub Actions, in `.github/`:
 | `tests.yml` | push/PR to `main`, manual | unit layers (lint, server with the coverage gate, web client), then the E2E with Playwright against the real server; the Playwright report is uploaded when it fails |
 | `check-quality.yml` | push/PR to `main` | ruff, ShellCheck, JavaScript syntax, `.sh` files executable in git, actions pinned to a hash, workflow YAML |
 | `codeql-analysis.yml` | push/PR, weekly | CodeQL for Python, JavaScript/TypeScript and the workflows |
-| `auto-complete-fields.yml` | PR opened/updated | assigns the author, labels by commit words and touched files, lists the commits in the PR body (`[...autoGenerate]`), titles it `Release vX.Y.Z - …`, fails if that version was already released |
+| `auto-complete-fields.yml` | PR opened/updated | assigns the author, labels by commit words and touched files, lists the commits in the PR body (`[...autoGenerate]`), titles it `Release vX.Y.Z - …`, fails on a `release/x.x.x` branch if that version was already released |
 | `create-tag-and-release.yml` | PR merged into `main` | creates the tag `vX.Y.Z` from `VERSION` and a GitHub release with the PR text, generated notes, the source tarball and `SHA256SUMS` (a `-rc.1` style version becomes a pre-release) |
 
 `setup-environment` (composite action) sets up Node, creates the venv from `requirements-dev.txt`,
@@ -198,7 +200,7 @@ git ls-remote --tags https://github.com/actions/setup-node.git 'v7.1.0^{}' 'v7.1
 
 ### Releasing
 
-1. In the PR, bump `VERSION` (semver: `1.1.0`, or `1.1.0-rc.1` for a pre-release).
+1. In a PR from a `release/x.x.x` branch, bump `VERSION` (semver: `1.1.0`, or `1.1.0-rc.1` for a pre-release).
 2. Merge into `main`. The tag and the release are created on their own.
 
 What the release is built from:
@@ -212,7 +214,8 @@ What the release is built from:
 | Type | a version with `-` (e.g. `1.1.0-rc.1`) is a pre-release; any other becomes "latest" |
 
 If the tag already exists (the PR did not bump `VERSION`), nothing is released and the run leaves a
-warning. The PR check `VERSION is new` catches that before the merge.
+warning. On a `release/x.x.x` branch, the PR check `VERSION is new` catches that before the merge;
+PRs from any other branch skip it, so they can merge without a new version.
 
 Issues use forms (`bug_report.yml`, `feature_request.yml`); PRs start from `pull_request_template.md`.
 
