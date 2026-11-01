@@ -2,7 +2,7 @@
 #    uv export --frozen --all-groups --no-emit-project --no-hashes -o requirements-dev.txt
 aiohappyeyeballs==2.7.1
     # via aiohttp
-aiohttp==3.13.5
+aiohttp==3.14.5
     # via
     #   devkit-lan-remote-desktop
     #   pytest-aiohttp
@@ -52,6 +52,7 @@ pytest-cov==7.1.0
 ruff==0.16.4
 typing-extensions==4.16.0
     # via
+    #   aiohttp
     #   aiosignal
     #   pytest-asyncio
 yarl==1.25.1
